@@ -147,11 +147,11 @@ class Config():
   def keys(self):
     return dict(self.cp.items('default')).keys()
 
-  def keysExist(self, cfg, keyArr):
+  def keysExist(self, keyArr): #cfg, 
     # test vars from config that should exist
     for var in keyArr:
-      if not (val := cfg.get(var)):
-        raise Exception(f"No {var} in config.ini")
+      if not (val := self.get(var)):
+        raise Exception(f"No key for {var} in config.ini")
       if not val:
         raise Exception(f"No value for {var} in config.ini")
     return True
@@ -160,9 +160,9 @@ class Config():
 class Test():
   def __init__(self):
     logging.info("initting test")
-  def cfg(self):#, cfg):
-    # logging.info(self.cfg['email'])
+  def cfg(self):
     config = Config('config.ini', 'default')
+    # logging.info(self.config.get('email'))
     print(config.get('dbname'))
     print(config.get('dbnames'))
     config.setStage('default')

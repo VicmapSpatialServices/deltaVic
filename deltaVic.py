@@ -30,7 +30,7 @@ class vmdelta():
       case "setup":
         Setup(self.STAGE).run()
       case "sync":
-        _db = self.getDb()
+        _db = DB(self.config)
         synccer = Synccer(self.config, _db)
         synccer.unWait() # queue any leftover jobs from last time.
         while(synccer.assess()):
@@ -45,7 +45,7 @@ class vmdelta():
       #   self.upload(self.thing)
       case "clean":
         if self.task == "db": # analyse and vaccuume the tables
-          _db = self.getDb()
+          _db = DB(self.config)
           logging.info("Analysing and Vaccuuming...")
           for dset in _db.getRecSet(LyrReg):
             if _db.table_exists(dset.identity):
@@ -58,13 +58,13 @@ class vmdelta():
           logging.info("task was not specified")
       case "scorch":
         # remove all datasets and empty the data table
-        _db = self.getDb()
+        _db = DB(self.config)
         for dset in _db.getRecSet(LyrReg):
           if dset.relation == 'table': _db.dropTable(dset.identity)
           # if dset.relation == 'view': _db.dropView(dset.identity)
         _db.truncate("vm_meta.data")
       case 'test':
-        _db = self.getDb()
+        _db = DB(self.config)
         synccer = Synccer(self.config, _db)
         # synccer.restore()
         synccer.dump()
@@ -73,13 +73,6 @@ class vmdelta():
         gui.mainloop()
         # print("print: action was not specified") # default to sync?
         # logging.info("action was not specified") # default to sync?
-  
-  def getDb(self):
-    return DB(self.config.get('dbHost'), 
-              self.config.get('dbPort'), 
-              self.config.get('dbName'), 
-              self.config.get('dbUser'), 
-              self.config.get('dbPswd'))
   
   # def upload(self):
   #   pass

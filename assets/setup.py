@@ -14,13 +14,12 @@ class Setup():
   def run(self):
     qa = QA() # each event will throw an Exception unless it passes
     
-    # _cfg = Config('config.ini')??
+    # TODO: allow input of cofig vars prior to each module of setup being executed.
     cfgVars = ['dbHost','dbPort','dbPort','dbName','dbUser','dbPswd', 'dbClientPath','baseUrl','email']
-    self.cfg.keysExist(self.cfg, cfgVars)
+    self.config.keysExist(cfgVars)
     
     # test connection - exception will be thrown if it is bad
-    self.db = DB(self.config.get('dbHost'), self.config.get('dbPort'), 
-                 self.config.get('dbName'), self.config.get('dbUser'), self.config.get('dbPswd'))
+    self.db = DB(self.config)
     
     qa.checkPostGis(self.db)
     qa.mkDbControl(self.db)
@@ -40,11 +39,11 @@ class Setup():
     logging.info(f"ApiKey: {self.config.stg['api_key']}")
     logging.info(f"deltaVic endpoint: {self.config.stg['baseUrl']}")
 
-    # for key, val in self.cfg.items():
+    # for key, val in self.config.items():
     #   logging.info(f"{key}: {val}")#, self.cfg['key'])
   
   def core(self):
-    self.db = DB(self.cfg['dbHost'], self.cfg['dbPort'], self.cfg['dbName'], self.cfg['dbUser'], self.cfg['dbPswd'])
+    self.db = DB(self.config)
     sqlUnretired = "update vm_meta.data set active=false where identity like 'vlat%' or identity like 'vtt%'"
     self.db.execute(sqlUnretired)
     sqlNotMisc = "update vm_meta.data set active=false where sup='MISC' and not "

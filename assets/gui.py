@@ -80,7 +80,7 @@ class GUI(Tk):
     # heading.grid(row=0, column=0, columnspan=2, padx=5, pady=5, sticky="W")
     
     if self.qaDb.get():
-      schs = self.guic.getDb().getSchemas()
+      schs = DB(self.guic.config).getSchemas()
       self.nrSchemas = len(schs)
       self.nrSchHalf = int((self.nrSchemas-1)/2)
       print(f"{self.nrSchemas} {self.nrSchHalf}")
@@ -98,7 +98,9 @@ class GUI(Tk):
     # self.lyrFrame.configure(background='skyblue')
     self.lyrFrame.bind("<Configure>", lambda e: self.lyrCanvas.configure(scrollregion=self.lyrCanvas.bbox("all")))
     self.lyrScrollbar = Scrollbar(owner, orient="vertical", command=self.lyrCanvas.yview)
-    
+    # print(f"popMetaFr: {self.lyrCanvas.bbox}")
+    # print(f"popMetaFr: {self.lyrCanvas.yview}")
+
     owner.columnconfigure(1, weight=1)
     owner.rowconfigure(1)#, weight=1)
     self.lyrFrame.columnconfigure(0, weight=1)
@@ -121,6 +123,7 @@ class GUI(Tk):
     getattr(self, f"btn{sch}").grid(row=row, column=col, sticky="W", padx=5)#, pady=(2,0))
 
   def showSch(self, owner, sch):
+    # print(f"showSch1: {self.lyrCanvas.bbox}")
     # change the schema button colours and remove the currentl lyrs
     if self.currentSchBtn:
       self.currentSchBtn.config(background=self.qaClrFail)
@@ -130,7 +133,7 @@ class GUI(Tk):
       item.destroy()
     
     print(f"showSch({owner}, {sch})")
-    lyrs = self.guic.getDb().getTables(sch)
+    lyrs = DB(self.guic.config).getTables(sch)
     # print(lyrs)
     # label = ttk.Label(self.lyrFrame, text="Layer List")
     # label.grid(row=0, column=0, pady=10)
@@ -143,6 +146,7 @@ class GUI(Tk):
     
     self.lyrScrollbar.grid(row=0, column=3, rowspan=self.nrSchHalf+1, sticky="ns")
     self.lyrCanvas.configure(yscrollcommand=self.lyrScrollbar.set, background='skyblue')
+    # print(f"showSch2: {self.lyrCanvas.bbox}")
     
   def showLyr(self, fr, lyr, rowNum, col):
     # print(f"showLyr({fr}, {lyr})")
@@ -411,21 +415,13 @@ class GuiControl():
     #   pass
     self.gui.qaAssess()
   
-  def getDb(self):
-    # if not self.db:
-    #   # self.db = DB(self.gui.endp.get(), self.gui.port.get(), self.gui.inst.get(), self.gui.user.get(), self.gui.pswd.get())
-    #   self.db = DB(self.config.get('dbHost'), self.config.get('dbPort'), self.config.get('dbName'), self.config.get('dbUser'), self.config.get('dbPswd'))
-    _db = DB(self.config.get('dbHost'), self.config.get('dbPort'), self.config.get('dbName'), self.config.get('dbUser'), self.config.get('dbPswd'))
-    return _db
-  
   def testDb(self):
     # print("testDb")
     # update config
     self.config.set({'dbHost':self.gui.endp.get(),'dbPort':self.gui.port.get(),'dbName':self.gui.inst.get(), 'dbUser':self.gui.user.get(), 'dbPswd':self.gui.pswd.get()})
-    # _db = DB(self.cfg['dbHost'], self.cfg['dbPort'], self.cfg['dbName'], self.cfg['dbUser'], self.cfg['dbPswd'])
     
     try:
-      self.getDb().connect()
+      DB(self.config).connect()
       # print(self.db.execute("select count(*) from vmadd.address"))
       self.gui.qaDb.set(1)
       print("db test successful")
@@ -440,7 +436,7 @@ class GuiControl():
     # self.config.set({'dbHost':self.gui.endp.get(),'dbPort':self.gui.port.get(),'dbName':self.gui.inst.get(), 'dbUser':self.gui.user.get(), 'dbPswd':self.gui.pswd.get()})
     
     try:
-      result = self.getDb().execute("SELECT PostGIS_full_version()")
+      result = DB(self.config).execute("SELECT PostGIS_full_version()")
       print(result)
       if not result: raise Exception("No PostGis Version detected.")
       self.gui.qaSpat.set(1)
@@ -456,7 +452,6 @@ class GuiControl():
     self.config.set({'dbClientPath':self.gui.binPath.get()})
 
     try:
-      # _db = DB(self.endp.get(), self.port.get(), self.inst.get(), self.user.get(), self.pswd.get())
       # print(self.binPath.get())
       ver = PGClient(None, self.gui.binPath.get()).get_restore_version()
       # print(f"PG Client version: {ver}")
@@ -472,14 +467,16 @@ class GuiControl():
 
   def sync(self):
     print("sync")
-    _db = DB(self.cfg['dbHost'], self.cfg['dbPort'], self.cfg['dbName'], self.cfg['dbUser'], self.cfg['dbPswd'])
-    synccer = Synccer(self.cfg, _db)
+    _db = DB(self.config)
+    synccer = Synccer(self.config, _db)
     synccer.unWait() # queue any leftover jobs from last time.
     while(synccer.assess()):
       synccer.run()
       # break
+
   def fix(self):
     print("fix")
+    # set the layers in error to seed loads.
 
 if __name__ == "__main__":
   gui = GUI(None, None)

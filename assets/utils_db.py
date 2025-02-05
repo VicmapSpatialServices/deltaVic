@@ -1,7 +1,7 @@
 import os, sys, psycopg2, time, platform, logging
 from collections import OrderedDict
 from pathlib import Path
-from .utils import FileUtils as FU
+from .utils import Config, FileUtils as FU
 
 # class DBConn():
 #   def __init__(self, host, port, dbname, uname, pswd):
@@ -122,13 +122,21 @@ class PGClient():
     return self.run_command(command_parts)
     
 class DB():
-  def __init__(self, host, port, dbname, uname, pswd):
-    self.host = host
-    self.port = port
-    self.dbname = dbname
-    self.uname = uname
-    self.pswd = pswd
-  
+  def __init__(self, config):#host, port, dbname, uname, pswd):
+    if type(config) == list:
+      self.host = config[0]
+      self.port = config[1]
+      self.dbname = config[2]
+      self.uname = config[3]
+      self.pswd = config[4]
+    elif type(config) == Config:
+      self.host = config.get('dbHost')
+      self.port = config.get('dbPort')
+      self.dbname = config.get('dbName')
+      self.uname = config.get('dbUser')
+      self.pswd = config.get('dbPswd')
+    else:
+      raise Exception(f"Wrong object ({type(config)}) passed to DB.init")
   # def __init__(self, detail:object):
   #   if isinstance(detail, DBConn):
   #     self.dbConn = detail
