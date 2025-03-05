@@ -5,6 +5,8 @@ from .utils_api import ApiUtils
 from .dbTable import LyrReg
 from .utils import Supplies, Config
 
+logger = logging.getLogger(__name__)
+
 class Setup():
   def __init__(self, stg):
     self.config = Config('config.ini', stg)
@@ -32,15 +34,15 @@ class Setup():
     qa.createVicmapSchemas(self.db)
 
   def status(self):
-    logging.info(f"testing config file has all required keys for '{self.config.getStage()}' instance: {self.config}")
-    logging.info(f"dbCnxn: {self.config.stg['dbUser']}:{self.config.stg['dbPswd']}@{self.config.stg['dbHost']}:{self.config.stg['dbPort']}/{self.config.stg['dbName']}")
-    logging.info(f"Email: {self.config.stg['email']}")
-    logging.info(f"ClientId: {self.config.stg['client_id']}")
-    logging.info(f"ApiKey: {self.config.stg['api_key']}")
-    logging.info(f"deltaVic endpoint: {self.config.stg['baseUrl']}")
+    logger.info(f"testing config file has all required keys for '{self.config.getStage()}' instance: {self.config}")
+    logger.info(f"dbCnxn: {self.config.stg['dbUser']}:{self.config.stg['dbPswd']}@{self.config.stg['dbHost']}:{self.config.stg['dbPort']}/{self.config.stg['dbName']}")
+    logger.info(f"Email: {self.config.stg['email']}")
+    logger.info(f"ClientId: {self.config.stg['client_id']}")
+    logger.info(f"ApiKey: {self.config.stg['api_key']}")
+    logger.info(f"deltaVic endpoint: {self.config.stg['baseUrl']}")
 
     # for key, val in self.config.items():
-    #   logging.info(f"{key}: {val}")#, self.cfg['key'])
+    #   logger.info(f"{key}: {val}")#, self.cfg['key'])
   
   def core(self):
     self.db = DB(self.config)
@@ -48,7 +50,7 @@ class Setup():
     self.db.execute(sqlUnretired)
     sqlNotMisc = "update vm_meta.data set active=false where sup='MISC' and not "
     sqlNotMisc += "(" + ' or '.join(f"identity like '{sch}%'" for sch in ['vmadmin','vmreftab','vmfeat']) + ")"
-    logging.info(sqlNotMisc)
+    logger.info(sqlNotMisc)
     # self.db.execute(sqlNotMisc)
     
 class QA():
@@ -70,11 +72,11 @@ class QA():
     try:
       db.execute("SELECT PostGIS_version()")
     except Exception as ex:
-      logging.warning(f"PostGis has not been installed in the {db.dbname} schema. Please install it as the database superuser.")
+      logger.warning(f"PostGis has not been installed in the {db.dbname} schema. Please install it as the database superuser.")
       # try: # issue, you have to be the superuser (postgres) to install postgis.
       #   self.db.execute("CREATE EXTENSION PostGIS")
       # except Exception as ex:
-      #   logging.error("Could not install PostGis on DB")
+      #   logger.error("Could not install PostGis on DB")
       #   raise ex
     
   @staticmethod
@@ -97,10 +99,10 @@ class QA():
     
     # if the client_id is null, we need to create it
     if not (_clientId := cfg.get('client_id')):
-      logging.debug("Submitting email address to obtain a client_id")
+      logger.debug("Submitting email address to obtain a client_id")
       api = ApiUtils(cfg.get('baseUrl'), None, None) # No client-id passed
       rsp = api.post("register", {"email":_email})
-      logging.debug("Updating config file with client_id...")
+      logger.debug("Updating config file with client_id...")
       _clientId = rsp['client_id']
       cfg.set({'client_id':_clientId})
       # cfg['client_id'] = rsp['client_id']
@@ -110,10 +112,10 @@ class QA():
       return 1, errStr # unverified
     
     if not (_apiKey := cfg.get("api_key")):
-      logging.info("Submitting client_id to obtain an api-key")
+      logger.info("Submitting client_id to obtain an api-key")
       api = ApiUtils(cfg.get('baseUrl'), None, _clientId)
       rsp = api.post("register", {"email":_email})
-      logging.info("Updating config file with api_key...")
+      logger.info("Updating config file with api_key...")
       # cfg['api_key'] = rsp['api_key']
       _apiKey = rsp['api_key']
       cfg.set({'api_key':_apiKey})
@@ -123,7 +125,7 @@ class QA():
     # if all 3 registration attrs are present in config, then return 0?
     # try and avoind this registration call every time the gui is opened.
     # return 2, "Registration"
-    logging.debug(f"Submitting register call to obtain rights.")# {cfg.keys()} {cfg.get('baseUrl')}")
+    logger.debug(f"Submitting register call to obtain rights.")# {cfg.keys()} {cfg.get('baseUrl')}")
     api = ApiUtils(cfg.get('baseUrl'), _apiKey, _clientId)
     rsp = api.post("register", {"email":_email})
     return 2, rsp['rights'] if 'rights' in rsp else "Registration"# "No rights" # all good to go
@@ -134,7 +136,7 @@ class QA():
     api = ApiUtils(cfg.get('baseUrl'), cfg.get('api_key'), cfg.get('client_id'))
     rsp = api.post("data", {})
     dsets = [LyrReg(d) for d in rsp['datasets']]
-    logging.info(f"Retrieved {len(rsp)}")
+    logger.info(f"Retrieved {len(rsp)}")
     
     # insert the records that don't exist yet
     _existingKeys = [d.identity for d in db.getRecSet(LyrReg)]
@@ -149,6 +151,6 @@ class QA():
     # check db has all vicmap schemas
     _dsets = db.getRecSet(LyrReg)
     _schemas = set([d.identity.split('.')[0] for d in _dsets])
-    logging.info(_schemas)
+    logger.info(_schemas)
     [db.createSch(sch) for sch in _schemas if sch not in db.getSchemas()]
  

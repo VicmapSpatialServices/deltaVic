@@ -3,6 +3,8 @@ from collections import OrderedDict
 from pathlib import Path
 from .utils import Config, FileUtils as FU
 
+logger = logging.getLogger(__name__)
+
 # class DBConn():
 #   def __init__(self, host, port, dbname, uname, pswd):
 #     self.host = host
@@ -32,40 +34,40 @@ class PGClient():
   def checkEnv(self):
       
     if "LIB_PATH" in os.environ.keys():
-      logging.debug("Library data path: {0}".format(os.environ["LIB_PATH"]))
+      logger.debug("Library data path: {0}".format(os.environ["LIB_PATH"]))
 
     #Check enviroment variables set for pgsql
     PGSQL_APPLICATION_NAME = "pgsql"
     pgsql_search_key = "/{0}".format(PGSQL_APPLICATION_NAME)
     plfm = platform.system().lower()
-    logging.debug(f"platform: {plfm}")
+    logger.debug(f"platform: {plfm}")
 
     # NB: This block is a mess due to earlier exhaustive testing reuired on aws al2 machines
     if platform.system().lower() == "linux":
       library_root = os.environ["LIB_PATH"]
-      logging.debug(f"pgsql_search_key: {pgsql_search_key}")
-      logging.debug("LD_LIBRARY_PATH: " + os.environ["LD_LIBRARY_PATH"])
-      logging.debug("PATH: " + os.environ["PATH"])
+      logger.debug(f"pgsql_search_key: {pgsql_search_key}")
+      logger.debug("LD_LIBRARY_PATH: " + os.environ["LD_LIBRARY_PATH"])
+      logger.debug("PATH: " + os.environ["PATH"])
       if pgsql_search_key not in os.environ["LD_LIBRARY_PATH"] or pgsql_search_key not in os.environ["PATH"] :
         pgsql_dir_bin = None
         pgsql_dir_lib = None
-        logging.debug("Searching {0} to find pgsql ...".format(library_root))
+        logger.debug("Searching {0} to find pgsql ...".format(library_root))
         for root, dirs, files in os.walk(library_root):
           if root.split(os.path.sep)[-1:][0] == "bin":
             pgsql_dir_bin = root
           if root.split(os.path.sep)[-1:][0] == "lib":
             pgsql_dir_lib = root
-        logging.debug("pgsql_dir_lib: {0}".format(pgsql_dir_lib))
+        logger.debug("pgsql_dir_lib: {0}".format(pgsql_dir_lib))
         if pgsql_dir_lib not in os.environ["LD_LIBRARY_PATH"]:
-          logging.debug("Adding {0} to LD_LIBRARY_PATH".format(pgsql_dir_lib))
+          logger.debug("Adding {0} to LD_LIBRARY_PATH".format(pgsql_dir_lib))
           os.environ["LD_LIBRARY_PATH"] = "{0}:{1}".format(os.environ["LD_LIBRARY_PATH"], pgsql_dir_lib)
         if pgsql_dir_bin not in os.environ["PATH"]:
-          logging.debug("Adding {0} to PATH".format(pgsql_dir_bin))
+          logger.debug("Adding {0} to PATH".format(pgsql_dir_bin))
           os.environ["PATH"] = "{0}:{1}".format(os.environ['PATH'], pgsql_dir_bin)
     else:
         # sys.path.append(self.dbClientPath) # use this, from the config file to pg_dump & pg_restore.
         os.environ["PATH"] += os.pathsep + self.dbClientPath
-        # logging.debug(f"sysPath: {sys.path}")
+        # logger.debug(f"sysPath: {sys.path}")
       
   def create_credential(self):
     """Creates a pg credential file to connect to the database."""
@@ -160,7 +162,7 @@ class DB():
     
   def execute(self, sqlStr, params=None):
     # psycopg2 will pass back a tuple of tuples: ((,,,),(,,,), ..)
-    logging.debug(f"SQL: {sqlStr} Parameters: {params}")
+    logger.debug(f"SQL: {sqlStr} Parameters: {params}")
     data = []
 
     cnxn = self.connect()
@@ -183,7 +185,7 @@ class DB():
     # field_name_list = [desc.name for desc in curs.description]
 
     # if msg := curs.statusmessage:
-    #   logging.info(msg)
+    #   logger.info(msg)
     
     curs.close()
     cnxn.close()
@@ -229,7 +231,7 @@ class DB():
     colsDict = self.getAllColsDict(tblQual)
     _ufiCr = f"max({ufiCreatedCol})" if ufiCreatedCol in colsDict.keys() else "now()::timestamp"
     pkeyType = [cType for cName, cType in colsDict.items() if cName==pkey][0]
-    logging.debug(f"pkeyType: {pkeyType}")
+    logger.debug(f"pkeyType: {pkeyType}")
 
     if pkey=='none' or not any(pkeyType.startswith(cType) for cType in ['int','bigint']):
       sqlStr = f"SELECT {_ufiCr}, 0, COUNT(*), 0 FROM {tblQual}"
@@ -244,7 +246,7 @@ class DB():
       raise Exception("Could not get table stats for {}. Does it exist?".format(tblQual))
   
   def analVac(self, ident): # analyze and vaccuume
-    logging.debug(f"{ident}: Analysing and Vaccuuming")
+    logger.debug(f"{ident}: Analysing and Vaccuuming")
     self.execute(f"analyze {ident}") # vmadd.address=14seconds
     self.execute(f"vacuum {ident}") # vmadd.address=12seconds
     
@@ -264,7 +266,7 @@ class DB():
     return ""
     
   def dropTable(self, tblQual:str):
-    logging.debug(f"Dropping table {tblQual}")
+    logger.debug(f"Dropping table {tblQual}")
     self.execute(f"DROP TABLE IF EXISTS {tblQual} CASCADE") # don't require return values
     
   def columnExists(self, tblQual:str, tblCol:str):

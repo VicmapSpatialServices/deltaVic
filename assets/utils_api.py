@@ -1,5 +1,7 @@
 import requests, logging, json
 
+logger = logging.getLogger(__name__)
+
 class ApiUtils():
   def __init__(self, baseUrl, api_key, client_id):
     self.url = baseUrl
@@ -16,7 +18,7 @@ class ApiUtils():
 
   def post(self, endp:str, data:dict):
     data.update({"client_id":self.client_id})
-    logging.debug(f" -> Submitting POST api call to /{endp}")
+    logger.debug(f" -> Submitting POST api call to /{endp}")
     response = requests.post(f"{self.url}/{endp}", json=data, headers=self.headers)#, auth=self.auth) # , files=files
     if response.status_code != 200:
       raise Exception(f"The {endp} endpoint was not successful. ErrCode={response.status_code} ErrMsg={response.text}")
@@ -26,7 +28,7 @@ class ApiUtils():
     with open(fPath, mode="rb") as file: #, buffering=0 ??#os.path.join(os.environ["DATA_PATH"], fPath)
       response = requests.put(s3_url, headers={"Content-Type":""}, files={"file":file})
 
-    logging.info(f"Finished upload of {fPath}")
+    logger.info(f"Finished upload of {fPath}")
     if response.status_code != 200:
       raise Exception(f"Upload to presigned-url did not succeeed. code:{response.status_code} msg:{response.text}")
 
@@ -45,7 +47,7 @@ class ApiUtils():
   @staticmethod
   def download_file(s3url, fPath):
     headers = {"Accept":"application/octet-stream"}
-    logging.debug(f"Downloading {fPath} from {s3url}")
+    logger.debug(f"Downloading {fPath} from {s3url}")
     
     with requests.get(s3url, headers=headers, stream=True) as stream:
       stream.raise_for_status()

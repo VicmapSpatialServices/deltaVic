@@ -8,6 +8,8 @@ from .setup import QA
 from .sync import Synccer
 from .utils import Config
 
+logger = logging.getLogger(__name__)
+
 from .dbTable import LyrReg
 
 class GUI(Tk):
@@ -397,7 +399,7 @@ class GuiControl():
     self.config.set({'email':self.gui.email.get()})
     qaCode, qaMsg = self.qa.checkApiClient(self.config)
     # if qaCode < 2:
-    #   logging.error(qaMsg)
+    #   logger.error(qaMsg)
     #   raise Exception(qaMsg)
     if qaCode == 0: #possible?
       # raise Exception("email not found")

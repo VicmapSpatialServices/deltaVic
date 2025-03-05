@@ -2,6 +2,8 @@ import os, logging, configparser, io, zipfile, shutil
 from subprocess import Popen, PIPE
 from glob import glob
 
+logger = logging.getLogger(__name__)
+
 class FileUtils():
   def __init__(self):
     pass
@@ -9,10 +11,10 @@ class FileUtils():
   @staticmethod
   def findFilesInRoot(root, fileName):
     findRegEx = "{}/**/{}".format(root, fileName) # regEx to find file.
-    logging.debug(findRegEx)
+    logger.debug(findRegEx)
     fileArr = glob(findRegEx, recursive=True) # py3.10 will allow root_dir as an arg here. https://docs.python.org/3.10/library/glob.html
     if not len(fileArr):
-      logging.warning("Cannot find file(s) {} in root {}".format(fileName, root))
+      logger.warning("Cannot find file(s) {} in root {}".format(fileName, root))
       return None
     else:
       return fileArr
@@ -33,15 +35,15 @@ class FileUtils():
   
   @staticmethod
   def remove(path):
-    logging.debug(f"removing path {path}")
+    logger.debug(f"removing path {path}")
     if os.path.isfile(path): os.remove(path)
     elif os.path.isdir(path): shutil.rmtree(path)
-    else: logging.warn(f"{path} is not a file or a dir!! It may not exist")
+    else: logger.warn(f"{path} is not a file or a dir!! It may not exist")
   
   @staticmethod
   #create_dir create a directory with the name of the archive to place the contents of the archive into.
   def extract(vml_bucket, srcZipPath:str, tgt:str):
-    logging.info("Extracting: {0} to {1}".format(srcZipPath, tgt))
+    logger.info("Extracting: {0} to {1}".format(srcZipPath, tgt))
     file_stream = io.BytesIO()
     vml_bucket.download_fileobj(srcZipPath, file_stream)
     zf = zipfile.ZipFile(file_stream)
@@ -50,16 +52,16 @@ class FileUtils():
 
   # @staticmethod
   # def runProc(procArgs: list):
-  #   logging.info(f"Running process {procArgs}")
+  #   logger.info(f"Running process {procArgs}")
   #   p = Popen(procArgs, stdout=PIPE, stderr=PIPE)
   #   stdout, stderr = p.communicate()
 
   @staticmethod
   def run_sub(params:list):
     _msgStr, _errStr = "",""
-    logging.debug(f"Sending Command: {' '.join(params)}")
-    # logging.debug("FU.LD_LIBRARY_PATH: " + os.environ["LD_LIBRARY_PATH"])
-    logging.debug("FU.PATH: " + os.environ["PATH"])
+    logger.debug(f"Sending Command: {' '.join(params)}")
+    # logger.debug("FU.LD_LIBRARY_PATH: " + os.environ["LD_LIBRARY_PATH"])
+    logger.debug("FU.PATH: " + os.environ["PATH"])
     
     # ["chmod","-R","a+x",dir] -- set execute recursive on dir
     # ["chmod","-R","a+rw",dir] -- set read/write recursive on dir
@@ -72,34 +74,46 @@ class FileUtils():
     stdout, stderr = proc.communicate()
     
     if _msgStr := stdout.decode().rstrip():
-      logging.debug(f"Command Response:{_msgStr}")
+      logger.debug(f"Command Response:{_msgStr}")
     if _errStr := stderr.decode():
-      logging.error(f"Command Response Error:{_errStr}")
+      logger.error(f"Command Response Error:{_errStr}")
       raise Exception(_errStr)
     
     return _msgStr
   
 class Logger():
   @staticmethod
-  def get():
-    log_formatter = logging.Formatter('%(asctime)s[%(levelname)s]  %(message)s') # - %(name)s -
+  def get(log_level=logging.INFO):
+    log_format_string = '%(asctime)s-%(name)s-[%(levelname)s] %(message)s'
+
+    log_formatter = logging.Formatter(log_format_string) # - %(name)s -
     _rootLog = logging.getLogger()
-    _rootLog.level = logging.INFO
+    _rootLog.level = log_level
     try: # on aws the getLogger command get a handler automatically
       hdlr = _rootLog.handlers[0]
       hdlr.setFormatter(log_formatter)
     except IndexError: # otherwise we have to make the handler ourselves
       # log_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-      console_handler = logging.StreamHandler()
-      console_handler.setFormatter(log_formatter)#'%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-      _rootLog.addHandler(console_handler)
+      # console_handler = logging.StreamHandler()
+      # console_handler.setFormatter(log_formatter)#'%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+      # _rootLog.addHandler(console_handler)
 
-      # formatter = logging.Formatter('%(asctime)s(%(levelname)8s): %(message)s', datefmt='%Y%m%d-%H:%M:%S')
+      # # formatter = logging.Formatter('%(asctime)s(%(levelname)8s): %(message)s', datefmt='%Y%m%d-%H:%M:%S')
+      # logFile = 'deltaVic.log'
+      # fh = logging.FileHandler(logFile, 'a' if os.path.exists(logFile) else 'w')
+      # fh.setLevel(log_level)
+      # fh.setFormatter(log_formatter)
+      # _rootLog.addHandler(fh)
+
       logFile = 'deltaVic.log'
-      fh = logging.FileHandler(logFile, 'a' if os.path.exists(logFile) else 'w')
-      fh.setLevel(logging.INFO)
-      fh.setFormatter(log_formatter)
-      _rootLog.addHandler(fh)
+      file_handler = logging.FileHandler(logFile, 'a' if os.path.exists(logFile) else 'w')
+      console_handler = logging.StreamHandler()
+
+      logging.basicConfig(
+          format=log_format_string,
+          level=log_level,
+          handlers=[console_handler, file_handler]
+      )
 
     return _rootLog
 
@@ -159,10 +173,10 @@ class Config():
 
 class Test():
   def __init__(self):
-    logging.info("initting test")
+    logger.info("initting test")
   def cfg(self):
     config = Config('config.ini', 'default')
-    # logging.info(self.config.get('email'))
+    # logger.info(self.config.get('email'))
     print(config.get('dbname'))
     print(config.get('dbnames'))
     config.setStage('default')
@@ -171,12 +185,12 @@ class Test():
 
   def db(self, db):
     result = db.item("select count(*) from eisedit.mapindex_100d")
-    logging.info(f"result: {result} *")
+    logger.info(f"result: {result} *")
     result = db.row("select count(*), sum(ufi) from eisedit.mapindex_100d")
-    logging.info(f"result: {result} *")
+    logger.info(f"result: {result} *")
     result = db.rows("select * from eisedit.mapindex_100d")
     rows = '\r'.join([str(r) for r in result])
-    logging.info(f" count:{len(result)}\r result: {rows} *")
+    logger.info(f" count:{len(result)}\r result: {rows} *")
   def api(self, api):
     api.getDatasets()
 

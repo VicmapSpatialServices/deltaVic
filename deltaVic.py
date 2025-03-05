@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from assets import DB, FU, Logger, Config, LyrReg
 from assets import Setup, Synccer, GUI
 
-rootLog = Logger().get()
+logger = logging.getLogger(__name__)
 # rootLog.level = logging.DEBUG
 # NOTSET=0, DEBUG=10, INFO=20, WARN=30, ERROR=40, CRITICAL=50
 
@@ -15,10 +15,11 @@ class vmdelta():
     self.action=vargs[0] if len(vargs) > 0 else "gui"#"sync" # default
     self.task  =vargs[1] if len(vargs) > 1 else False
     self.thing =vargs[2] if len(vargs) > 2 else False
-    logging.debug("running deltaVic...")
+    logger.debug("running deltaVic...")
 
     self.config = Config("config.ini", self.STAGE)
-    logging.getLogger().setLevel(int(self.config.get('log_level')))
+
+    Logger().get(int(self.config.get('log_level')))
     
   def run(self):
     print(self.action)
@@ -46,16 +47,16 @@ class vmdelta():
       case "clean":
         if self.task == "db": # analyse and vaccuume the tables
           _db = DB(self.config)
-          logging.info("Analysing and Vaccuuming...")
+          logger.info("Analysing and Vaccuuming...")
           for dset in _db.getRecSet(LyrReg):
             if _db.table_exists(dset.identity):
-              # logging.info(f"...{dset.identity}")
+              # logger.info(f"...{dset.identity}")
               _db.analVac(dset.identity)
         elif self.task == "files": # remove any leftover files in temp
           for dir, subdir, files in os.walk('temp'):
             [FU.remove(f"{dir}{os.sep}{ff}") for ff in files]
         else:
-          logging.info("task was not specified")
+          logger.info("task was not specified")
       case "scorch":
         # remove all datasets and empty the data table
         _db = DB(self.config)
@@ -72,26 +73,26 @@ class vmdelta():
         gui = GUI(None, None)
         gui.mainloop()
         # print("print: action was not specified") # default to sync?
-        # logging.info("action was not specified") # default to sync?
+        # logger.info("action was not specified") # default to sync?
   
   # def upload(self):
   #   pass
 
 def main():
   startTime = datetime.now()
-  # logging.info(f"Start Time: {startTime}")
+  #logger.info(f"Start Time: {startTime}")
   
   try:
     vmd = vmdelta(sys.argv[1:])
     vmd.run()
   except Exception as ex:
-    logging.info(f"Exception: {str(ex)}")
-    logging.info(traceback.format_exc())
+    logger.info(f"Exception: {str(ex)}")
+    logger.info(traceback.format_exc())
   
   endTime = datetime.now()
-  # logging.info(f"End Time: {endTime}")
+  # logger.info(f"End Time: {endTime}")
   duration = (endTime - startTime).total_seconds()
-  logging.info(f"Duration: {str(timedelta(seconds=duration)).split('.')[0]}")
+  logger.info(f"Duration: {str(timedelta(seconds=duration)).split('.')[0]}")
 
 if __name__ == "__main__":
   main()
