@@ -6,6 +6,8 @@ from .utils_api import ApiUtils
 from .dbTable import LyrReg
 from .utils import FileUtils as FU, Supplies
 
+logger = logging.getLogger(__name__)
+
 ###########################################################################
 
 class Synccer():
@@ -30,7 +32,7 @@ class Synccer():
     self.views = [ll for ll in _layers if ll.relation=='view']
     
     if _nmbr := len(self.tables) + len(self.views):
-      logging.info(f'To Process: {len(self.tables)} table and {len(self.views)} views')
+      logger.info(f'To Process: {len(self.tables)} table and {len(self.views)} views')
     return _nmbr
   
   def resolve(self):
@@ -41,10 +43,10 @@ class Synccer():
     [_local.update({d.identity:d}) for d in _all_local if  not d.err]
     [_errs.update({d.identity:d}) for d in _all_local if d.err]
     [_remote.update({ll.identity:ll}) for ll in self.getVicmap()]
-    logging.info(f"Layer state: {len(_all_local)} in vm_meta.data, {len([i for i in _local if _local[i].active])} active, {len(_errs)} errors. {len(_remote)} available from vicmap_master")
+    logger.info(f"Layer state: {len(_all_local)} in vm_meta.data, {len([i for i in _local if _local[i].active])} active, {len(_errs)} errors. {len(_remote)} available from vicmap_master")
 
     # scroll thorugh the remote datasets and add any that don't exist locally
-    logging.debug("checking remote layers exist locally")
+    logger.debug("checking remote layers exist locally")
     for name, dset in _remote.items():
       if not (_lyr := _local.get(name) or _errs.get(name)):
       # if name not in list(_local.keys()).extend(list(_errs.keys())):
@@ -53,15 +55,15 @@ class Synccer():
         self.db.execute(*dset.insSql())
 
     # scroll through the local datasets and set to queued if versions don't match
-    logging.debug("checking local layers against remote")
+    logger.debug("checking local layers against remote")
     for name,lyr in _local.items():
       if not (_vmLyr := _remote.get(name)):
-        logging.warning(f"Dataset {name} doesn't exist in the remote vicmap_master") # auto delete? in qa at start/end?
+        logger.warning(f"Dataset {name} doesn't exist in the remote vicmap_master") # auto delete? in qa at start/end?
         continue
       # Note conditions: only compare those datasets present locally as active, in a complete state and not in err.
       if lyr.active and lyr.status == LyrReg.COMPLETE:
         if lyr.sup_ver != _vmLyr.sup_ver:
-          # logging.debug(f"{lyr.sup_ver}, {_vmLyr.sup_ver}")
+          # logger.debug(f"{lyr.sup_ver}, {_vmLyr.sup_ver}")
           self.db.execute(*lyr.upStatusSql(LyrReg.QUEUED))
 
   def getVicmap(self):#seedDsets(self):
@@ -78,11 +80,11 @@ class Synccer():
       else:
         if self.views: # process views based on status
           [Sync(self.db, self.config, vw, self.haltStates,tracker).process() for vw in self.views]
-      logging.info("--timings report--")
-      [logging.info(f"{state:<10}: {secs:8.2f}") for state, secs in tracker.items()]
+      logger.info("--timings report--")
+      [logger.info(f"{state:<10}: {secs:8.2f}") for state, secs in tracker.items()]
     except Exception as ex:
       _msg = "Something went wrong in the Synccer"
-      logging.error(_msg)
+      logger.error(_msg)
       raise Exception(_msg)
   
   def restore(self, lyrQual):
@@ -120,13 +122,13 @@ class Sync():
         
         self.upTrack(_status, (datetime.now()-startTime).total_seconds(), self.lyr)
       except Exception as ex:
-        logging.error(str(ex))
-        logging.debug(traceback.format_exc())
+        logger.error(str(ex))
+        logger.debug(traceback.format_exc())
         self.db.execute(*self.lyr.upExtraSql({"error":str(ex)}))
         self.db.execute(*self.lyr.setErr())
 
   def queued(self):
-    logging.debug(F"q-ing {self.lyr.identity} -- current({self.lyr.sup}:{self.lyr.sup_ver}:{self.lyr.sup_type})")
+    logger.debug(F"q-ing {self.lyr.identity} -- current({self.lyr.sup}:{self.lyr.sup_ver}:{self.lyr.sup_type})")
     self.db.execute(*self.lyr.delExtraKey('error')) # clear the err for a new run
     
     # get the next dump file from data endpoint
@@ -134,22 +136,22 @@ class Sync():
     _rsp = api.post("data", {"dset":self.lyr.identity,"sup_ver":self.lyr.sup_ver})
     if not (_next := _rsp.get("next")):
       if self.lyr.sup_ver == _rsp.get("sup_ver"): # have the latest already
-        logging.warn("Requested data load but endpoint says max(sup_ver) is current")
+        logger.warn("Requested data load but endpoint says max(sup_ver) is current")
         self.db.execute(*self.lyr.upStatusSql(LyrReg.COMPLETE))
       else:
-        logging.warn("Requested data load but endpoint says next ready only half ready yet")
+        logger.warn("Requested data load but endpoint says next ready only half ready yet")
         self.db.execute(*self.lyr.upStatusSql(LyrReg.WAIT))
       return
     
     self.db.execute(*self.lyr.upExtraSql(_next))
 
     _supDate = datetime.fromisoformat(_next['sup_date']) if _next['sup_date'] else None # always there? Is there an edge case it may still be missing?
-    logging.info(F"q-ing {self.lyr.identity} ({self.lyr.sup}:{self.lyr.sup_ver}:{self.lyr.sup_type})-->({_next['sup_ver']}:{_next['sup_type']})")#:{_supDate}
+    logger.info(F"q-ing {self.lyr.identity} ({self.lyr.sup}:{self.lyr.sup_ver}:{self.lyr.sup_type})-->({_next['sup_ver']}:{_next['sup_type']})")#:{_supDate}
     self.db.execute(*self.lyr.upSupSql(_next['sup_ver'], _next['sup_type'], _supDate))
     self.db.execute(*self.lyr.upStatusSql(LyrReg.DOWNLOAD))
 
   def download(self):
-    logging.debug(F" -> download-ing {self.lyr.identity}")
+    logger.debug(F" -> download-ing {self.lyr.identity}")
     if not os.path.exists("temp"): os.makedirs("temp")
     fPath = f"temp/{self.lyr.extradata['filename']}"
     ApiUtils.download_file(self.lyr.extradata['s3_url'], fPath)
@@ -159,7 +161,7 @@ class Sync():
 
   def restore(self):
     # restore the file - full loads go straight to each vicmap schema, incs go to the vm_delta schema.
-    # logging.debug(f"restore version: {PGClient(self.db, self.config.get('dbClientPath')).get_restore_version()}") # test pg connection.
+    # logger.debug(f"restore version: {PGClient(self.db, self.config.get('dbClientPath')).get_restore_version()}") # test pg connection.
     fPath = f"temp/{self.lyr.extradata['filename']}"
     PGClient(self.db, self.config.get('dbClientPath')).restore_file(fPath)
     
@@ -169,11 +171,11 @@ class Sync():
       self.db.execute(*self.lyr.upStatusSql(LyrReg.OPS))#DELETE
   
   def ops(self): # maintains idempotency if you are doing reRunFromState.
-    logging.debug(f" -> Deleting rows for {self.lyr.identity}")
+    logger.debug(f" -> Deleting rows for {self.lyr.identity}")
     _delta = self.lyr.extradata['filename'].replace('.dmp','')
     self.db.execute(f"delete from {self.lyr.identity} where {self.lyr.pkey} in (select {self.lyr.pkey} from {_delta})")
 
-    logging.debug(f" -> Adding rows for {self.lyr.identity}")
+    logger.debug(f" -> Adding rows for {self.lyr.identity}")
     colsCsv = ",".join(self.db.getAllCols(self.lyr.identity)) # Get Column names as csv for sql.
     self.db.execute(f"insert into {self.lyr.identity} (select {colsCsv} from {_delta} where operation='INSERT')")
     
@@ -191,17 +193,17 @@ class Sync():
   def reconcile(self): # reconcile the row count and check sum -> signOff()?
     # warning: if table is malformed and missing ufi_created col, it will fail here and not insert stats, which will throw errs when assembling datasets.
     # warning 2, if a datasets does not have a pkey specified it will also failed - need to update the control schema prior to anyone seeding.
-    logging.debug(F" -> reconcile-ing {self.lyr.identity}")
+    logger.debug(F" -> reconcile-ing {self.lyr.identity}")
     recStr = ""
     
     try: 
       supCount, supChkSum = self.lyr.extradata['row_count'], self.lyr.extradata['check_sum']
-      logging.debug(f"{supCount} {supChkSum}")
+      logger.debug(f"{supCount} {supChkSum}")
       maxUfiDate, maxUfi, tblCount, tblChkSum = self.db.getTblStats(self.lyr.identity, Supplies.meta(self.lyr.sup).ufiCreateCol, self.lyr.pkey) # , state_query=self.obj.pidUpSql()
-      logging.debug(f"{tblCount} {tblChkSum}")
+      logger.debug(f"{tblCount} {tblChkSum}")
       
     except Exception as ex:
-      logging.warning(f"{self.lyr.identity} did not return stats: {str(ex)}")
+      logger.warning(f"{self.lyr.identity} did not return stats: {str(ex)}")
       raise Exception(f"Problem getting stats: {str(ex)}")
     
     recStr += f" count(remote:{supCount}!=local:{tblCount})-diff({supCount-tblCount})" if tblCount!=supCount else ""
@@ -215,10 +217,10 @@ class Sync():
    
   def clean(self):
     # clean up the temp file and the temp view
-    logging.debug(F" -> clean-ing {self.lyr.identity}")
-    if self.lyr.sup_type == Supplies.INC:
-      self.db.dropTable(self.lyr.extradata['filename'].replace('.dmp',''))
-    FU.remove(f"temp/{self.lyr.extradata['filename']}")
+    logger.debug(F" -> clean-ing {self.lyr.identity}")
+    # if self.lyr.sup_type == Supplies.INC:
+    #   self.db.dropTable(self.lyr.extradata['filename'].replace('.dmp',''))
+    # FU.remove(f"temp/{self.lyr.extradata['filename']}")
     # status->COMPLETE or err=true
     self.db.execute(*self.lyr.upStatusSql(LyrReg.COMPLETE))
 

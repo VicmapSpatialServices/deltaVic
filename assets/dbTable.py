@@ -1,6 +1,8 @@
 import json, logging
 from datetime import datetime
 
+logger = logging.getLogger(__name__)
+
 class DBTable():
   QUEUED="QUEUED"
   DOWNLOAD="DOWNLOAD"
@@ -22,8 +24,8 @@ class DBTable():
     _cols = _upDict.keys()
     sqlStr =  f"INSERT into {self.name} ({','.join(_cols)}) VALUES ({('%s,'*len(_cols))[0:-1]})"
     sqlParams = list(_upDict.values())
-    # logging.info(f"sqlStr:{sqlStr}")
-    # logging.info(f"sqlParams:{sqlParams}")
+    # logger.info(f"sqlStr:{sqlStr}")
+    # logger.info(f"sqlParams:{sqlParams}")
     return sqlStr, sqlParams
 
   def setErr(self, errState=True):
@@ -64,7 +66,7 @@ class DBTable():
   def upExtraSql(self, dicty=None):
     self.extradata = self.extradata or {} # set as empty dict if None
     if isinstance(self.extradata, str): # dodgy fix?
-      logging.warn("Extradata was a string, fixing")
+      logger.warning("Extradata was a string, fixing")
       self.extradata = json.loads(self.extradata)
     # update with the new values or clear the field if None was supplied.
     self.extradata.update(dicty) if dicty else self.extradata.clear()
@@ -99,9 +101,9 @@ class LyrReg(DBTable):
     elif type(lyrObj) == dict:
       sup_date = datetime.fromisoformat(lyrObj['sup_date']) if lyrObj['sup_date'] else None
       newRow = [lyrObj['identity'],True,lyrObj['relation'],lyrObj['geom_type'],lyrObj['pkey'],LyrReg.QUEUED,False,lyrObj['sup'],lyrObj['sup_ver'],sup_date,None,None,None,None]
-      # logging.debug(f"initting new row: {newRow}")
+      # logger.debug(f"initting new row: {newRow}")
       super().__init__(newRow)
-      # logging.debug(self.sup_ver)
+      # logger.debug(self.sup_ver)
     else:
       raise Exception(f"Layer Object was not in an expected format")
   
