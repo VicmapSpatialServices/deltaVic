@@ -1,4 +1,4 @@
-from tkinter import ttk, Tk, Button, Checkbutton, Frame, Label, Entry, Text, StringVar, IntVar, END, Scrollbar, Canvas
+from tkinter import ttk, Tk, Button, Checkbutton, Frame, Label, Entry, Text, StringVar, IntVar, END, Scrollbar, Canvas, INSERT
 # import tkinter as tk
 import logging, traceback
 from copy import deepcopy
@@ -75,6 +75,7 @@ class GUI(Tk):
   def popMetaFrame(self, owner):
     self.currentLyrs = []
     self.currentSchBtn = None
+    self.currentLyrBtn = None
     self.nrSchemas = 0
     self.nrSchHalf = 0
     rowNum, colNum = 0, 0
@@ -133,7 +134,21 @@ class GUI(Tk):
     self.currentSchBtn = getattr(self, f"btn{sch}")
     self.currentSchBtn.config(background=self.qaClrPass)
     for item in self.currentLyrs:
-      item.destroy()
+       item.destroy()
+
+    # print("CANVAS CHILDREN:")
+    print(self.lyrFrame.children)
+    # print(self.lyrCanvas.configure(height=10))
+
+    # TODO: Redo this, reset the height or something else instead.
+    # Re-instantiate layer frame to reset height
+    self.lyrCanvas = Canvas(owner, width=300)#, background='skyblue')
+    self.lyrFrame = ttk.Frame(self.lyrCanvas, style='bad.TFrame')#, width=50)
+    self.lyrFrame.bind("<Configure>", lambda e: self.lyrCanvas.configure(scrollregion=self.lyrCanvas.bbox("all")))
+
+    # self.lyrScrollbar = Scrollbar(owner, orient="vertical", command=self.lyrCanvas.yview)
+    # self.lyrCanvas.bind_all("<MouseWheel>", self._on_lyr_mousewheel)   
+    
     
     print(f"showSch({owner}, {sch})")
     lyrs = DB(self.guic.config).getTables(sch)
@@ -144,20 +159,38 @@ class GUI(Tk):
     self.lyrCanvas.create_window((0, 0), window=self.lyrFrame, anchor="nw")
     self.lyrCanvas.grid(row=0, column=2, rowspan=self.nrSchHalf+1, sticky="nsew")
     for lyr in lyrs:
-      self.showLyr(self.lyrFrame, lyr, rowNum, 0)
+      self.showLyrBtn(self.lyrFrame, lyr, rowNum, 0)
       rowNum += 1
+
+    #print(self.lyrFrame.children)
     
     self.lyrScrollbar.grid(row=0, column=3, rowspan=self.nrSchHalf+1, sticky="ns")
     self.lyrCanvas.configure(yscrollcommand=self.lyrScrollbar.set, background='skyblue')
     # print(f"showSch2: {self.lyrCanvas.bbox}")
     
-  def showLyr(self, fr, lyr, rowNum, col):
+  def showLyrBtn(self, fr, lyr, rowNum, col):
     # print(f"showLyr({fr}, {lyr})")
-    setattr(self, f"lyr{lyr}", Label(fr, text=lyr, padx=10, background="white")) #, command=lambda:self.showLyr(owner, getattr(self, f"lyr{lyr}").get())
-    getattr(self, f"lyr{lyr}").grid(row=rowNum, column=col, sticky="W", padx=5, pady=1)
-    self.currentLyrs.append(getattr(self, f"lyr{lyr}"))
+    print(f"lyrBtn{lyr}")
+
+    setattr(self, f"lyrBtn{lyr}", Button(fr, text=lyr, padx=10, background=self.qaClrFail, command=lambda:self.showLyrDetails(lyr))) #, command=lambda:self.showLyr(owner, getattr(self, f"lyrBtn{lyr}").get())
+    #setattr(self, f"lyrBtn{lyr}", Button(None, textvariable="test", width=8, height=1, padx=1, relief="solid", background=self.qaClrFail))
+    getattr(self, f"lyrBtn{lyr}").grid(row=rowNum, column=col, sticky="W", padx=5, pady=1)
+    self.currentLyrs.append(getattr(self, f"lyrBtn{lyr}"))
   ###########################################################################
   ###########################################################################
+
+  def showLyrDetails(self, lyr):
+    print(lyr)
+
+    # change the layer button colours and remove the current layer details
+    if self.currentLyrBtn:
+      self.currentLyrBtn.config(background=self.qaClrFail)
+    self.currentLyrBtn = getattr(self, f"lyrBtn{lyr}")
+    self.currentLyrBtn.config(background=self.qaClrPass)
+
+    self.lyrInfo.insert(INSERT, lyr)
+
+
   
   def popSetupFrame(self, owner):
     # Label(tSetup, text='Vicmap Replication Service', font=(32)).grid(row=0, column=0, columnspan=2, padx=5, pady=5)
