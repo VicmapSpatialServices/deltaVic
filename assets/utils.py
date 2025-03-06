@@ -81,9 +81,9 @@ class FileUtils():
     
     return _msgStr
   
-class Logger():
+class LoggerConfig():
   @staticmethod
-  def get(log_level=logging.INFO):
+  def configure_root_logger(log_level=logging.INFO):
     log_format_string = '%(asctime)s-%(name)s-[%(levelname)s] %(message)s'
 
     log_formatter = logging.Formatter(log_format_string) # - %(name)s -
