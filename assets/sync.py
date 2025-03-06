@@ -34,11 +34,14 @@ class Synccer():
     return _nmbr
   
   def resolve(self):
+    _all_local = self.db.getRecSet(LyrReg)
+
     _local, _errs, _remote = {}, {}, {}
-    [_local.update({d.identity:d}) for d in self.db.getRecSet(LyrReg) if  not d.err]
-    [_errs.update({d.identity:d}) for d in self.db.getRecSet(LyrReg) if d.err]
+
+    [_local.update({d.identity:d}) for d in _all_local if  not d.err]
+    [_errs.update({d.identity:d}) for d in _all_local if d.err]
     [_remote.update({ll.identity:ll}) for ll in self.getVicmap()]
-    logging.info(f"Layer state: {len(_local)} locally, {len(_errs)} errors, {len(_remote)} from vicmap_master")
+    logging.info(f"Layer state: {len(_all_local)} in vm_meta.data, {len([i for i in _local if _local[i].active])} active, {len(_errs)} errors. {len(_remote)} available from vicmap_master")
 
     # scroll thorugh the remote datasets and add any that don't exist locally
     logging.debug("checking remote layers exist locally")
@@ -53,7 +56,7 @@ class Synccer():
     logging.debug("checking local layers against remote")
     for name,lyr in _local.items():
       if not (_vmLyr := _remote.get(name)):
-        logging.warning(f"Dataset {name} is inactive or doesn't exist in the remote vicmap_master") # auto delete? in qa at start/end?
+        logging.warning(f"Dataset {name} doesn't exist in the remote vicmap_master") # auto delete? in qa at start/end?
         continue
       # Note conditions: only compare those datasets present locally as active, in a complete state and not in err.
       if lyr.active and lyr.status == LyrReg.COMPLETE:
