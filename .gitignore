@@ -1,4 +1,5 @@
-temp
+temp*
 __pycache__
 deltaVic.code-workspace
 deltaVic.log
+config.ini
