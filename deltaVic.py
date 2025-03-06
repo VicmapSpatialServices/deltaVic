@@ -1,7 +1,7 @@
 import sys, os, logging, traceback
 from datetime import datetime, timedelta
 
-from assets import DB, FU, Logger, Config, LyrReg
+from assets import DB, FU, LoggerConfig, Config, LyrReg
 from assets import Setup, Synccer, GUI
 
 logger = logging.getLogger(__name__)
@@ -18,8 +18,6 @@ class vmdelta():
     logger.debug("running deltaVic...")
 
     self.config = Config("config.ini", self.STAGE)
-
-    Logger().get(int(self.config.get('log_level')))
     
   def run(self):
     print(self.action)
@@ -83,6 +81,9 @@ def main():
   #logger.info(f"Start Time: {startTime}")
   
   try:
+    STAGE='default'
+    config = Config("config.ini", STAGE)
+    LoggerConfig().configure_root_logger(int(config.get('log_level')))
     vmd = vmdelta(sys.argv[1:])
     vmd.run()
   except Exception as ex:
