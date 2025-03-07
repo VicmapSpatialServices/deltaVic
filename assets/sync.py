@@ -218,9 +218,9 @@ class Sync():
   def clean(self):
     # clean up the temp file and the temp view
     logger.debug(F" -> clean-ing {self.lyr.identity}")
-    # if self.lyr.sup_type == Supplies.INC:
-    #   self.db.dropTable(self.lyr.extradata['filename'].replace('.dmp',''))
-    # FU.remove(f"temp/{self.lyr.extradata['filename']}")
+    if self.lyr.sup_type == Supplies.INC:
+      self.db.dropTable(self.lyr.extradata['filename'].replace('.dmp',''))
+    FU.remove(f"temp/{self.lyr.extradata['filename']}")
     # status->COMPLETE or err=true
     self.db.execute(*self.lyr.upStatusSql(LyrReg.COMPLETE))
 
