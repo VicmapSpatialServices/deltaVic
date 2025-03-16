@@ -8,6 +8,8 @@ from .setup import QA
 from .sync import Synccer
 from .utils import Config
 
+from .dbTable import LyrReg
+
 class GUI(Tk):
   def __init__(self, stg):#, cfg):
     super().__init__()
@@ -74,6 +76,7 @@ class GUI(Tk):
     self.currentLyrs = []
     self.currentSchBtn = None
     self.nrSchemas = 0
+    self.nrSchHalf = 0
     rowNum, colNum = 0, 0
     
     # heading = Label(owner, text='Data Content, Status and Metadata', bg=self.bgClrPass)
@@ -207,8 +210,8 @@ class GUI(Tk):
     self.syncBtn = Button(fr, text='SYNC', font=(72), padx=30, relief="solid", background="OliveDrab3", command=self.guic.sync)
     self.syncBtn.grid(row=2, column=3)#, padx=5, pady=5)#.pack(side='top', fill='none', padx=5, pady=(15,0))
     # Button(tSetup, text='SYNC', font=(288), command=self.sync).grid(row=1, column=0)
-    self.closeBtn = Button(fr, text="Close", font=(288), command=self.close)
-    self.closeBtn.grid(row=0, column=6, sticky='E', padx=5, pady=5)
+    self.openCloseBtn = Button(fr, text="Close", font=(288), command=self.dbOpenClose)
+    self.openCloseBtn.grid(row=0, column=6, sticky='E', padx=5, pady=5)
     
     qaFr = Frame(fr, borderwidth=1, relief="solid")
     Label(qaFr, text='QA', font=(32)).grid(row=0, column=0, columnspan=2, pady=2)
@@ -357,16 +360,15 @@ class GUI(Tk):
     
   ###########################################################################
 
-  def close(self):#, event):
+  def dbOpenClose(self):#, event):
     print(self.qaDb.get())
+    self.openCloseBtn.configure(text='Open' if not self.qaDb.get() else 'Close')
     self.qaDb.set(1) if not self.qaDb.get() else self.qaDb.set(0)
     # self.regFrmBg.set('OliveDrab3')
     # self.dbFrm.config(background='OliveDrab3')
     self.style.configure('TFrame', background='brown')
-    # self.dsetCnt.set(550)
-    self.dsetCnt.config(text='553')
-    self.activeCnt.config(text='473')
-    self.errCnt.config(text='3')
+
+    self.guic.updateDBCounts()
     
     self.update_idletasks()
     # print(self.regFrmBg.get())
@@ -425,6 +427,7 @@ class GuiControl():
       # print(self.db.execute("select count(*) from vmadd.address"))
       self.gui.qaDb.set(1)
       print("db test successful")
+      self.updateDBCounts()
     except Exception as ex:
       self.gui.qaDb.set(0)
       print(f"db cnxn test failed. Error:{ex}")
@@ -474,9 +477,24 @@ class GuiControl():
       synccer.run()
       # break
 
+    self.updateDBCounts()
+
   def fix(self):
     print("fix")
-    # set the layers in error to seed loads.
+    # TODO: set the layers in error to seed loads.
+
+  def updateDBCounts(self):
+    if self.gui.qaDb.get():
+      _db = DB(self.config)
+      _local = _db.getRecSet(LyrReg)
+
+      self.gui.dsetCnt.config(text=f'{str(len([d for d in _local]))}')
+      self.gui.activeCnt.config(text=f'{str(len([d  for d in _local if d.active and not d.err]))}')
+      self.gui.errCnt.config(text=str(len([d for d in _local if d.err])))
+    else:
+      self.gui.dsetCnt.config(text="   ")
+      self.gui.activeCnt.config(text="   ")
+      self.gui.errCnt.config(text="   ")
 
 if __name__ == "__main__":
   gui = GUI(None, None)
