@@ -8,6 +8,8 @@ from .setup import QA
 from .sync import Synccer
 from .utils import Config
 
+from .utils_api import ApiUtils
+
 from .dbTable import LyrReg
 
 class GUI(Tk):
@@ -97,7 +99,7 @@ class GUI(Tk):
     # self.lyrFrame = Frame(owner, borderwidth=1, relief="flat", width=250, height=400)
     # self.lyrFrame.grid(row=1, rowspan=rowNum, column=1, sticky='nsew')
     
-    self.lyrCanvas = Canvas(owner, width=300)#, background='skyblue')
+    self.lyrCanvas = Canvas(owner, width=200, background='red')
     self.lyrFrame = ttk.Frame(self.lyrCanvas, style='bad.TFrame')#, width=50)
     # self.lyrFrame.configure(background='skyblue')
     self.lyrFrame.bind("<Configure>", lambda e: self.lyrCanvas.configure(scrollregion=self.lyrCanvas.bbox("all")))
@@ -121,7 +123,7 @@ class GUI(Tk):
   def mkSchBtn(self, owner, sch, row, col):
     # self.syncBtn = Button(fr, text='SYNC', font=(72), padx=30, relief="solid", background="salmon", command=self.guic.sync)
     setattr(self, f"sch{sch}", StringVar(value=sch))
-    setattr(self, f"btn{sch}", Button(owner, textvariable=getattr(self, f"sch{sch}"), width=8, height=1, padx=1, relief="solid", background=self.qaClrFail))
+    setattr(self, f"btn{sch}", ttk.Button(owner, textvariable=getattr(self, f"sch{sch}"), width=8, height=1, padx=1, relief="solid", background=self.qaClrFail))
     getattr(self, f"btn{sch}").config(command=lambda:self.showSch(owner, getattr(self, f"sch{sch}").get()))
     # self.syncBtn.
     getattr(self, f"btn{sch}").grid(row=row, column=col, sticky="W", padx=5)#, pady=(2,0))
@@ -133,6 +135,8 @@ class GUI(Tk):
       self.currentSchBtn.config(background=self.qaClrFail)
     self.currentSchBtn = getattr(self, f"btn{sch}")
     self.currentSchBtn.config(background=self.qaClrPass)
+
+    self.currentLyrBtn = None
     for item in self.currentLyrs:
        item.destroy()
 
@@ -159,7 +163,7 @@ class GUI(Tk):
     self.lyrCanvas.create_window((0, 0), window=self.lyrFrame, anchor="nw")
     self.lyrCanvas.grid(row=0, column=2, rowspan=self.nrSchHalf+1, sticky="nsew")
     for lyr in lyrs:
-      self.showLyrBtn(self.lyrFrame, lyr, rowNum, 0)
+      self.showLyrBtn(self.lyrFrame, sch, lyr, rowNum, 0)
       rowNum += 1
 
     #print(self.lyrFrame.children)
@@ -168,27 +172,44 @@ class GUI(Tk):
     self.lyrCanvas.configure(yscrollcommand=self.lyrScrollbar.set, background='skyblue')
     # print(f"showSch2: {self.lyrCanvas.bbox}")
     
-  def showLyrBtn(self, fr, lyr, rowNum, col):
+  def showLyrBtn(self, fr, sch, lyr, rowNum, col):
     # print(f"showLyr({fr}, {lyr})")
     print(f"lyrBtn{lyr}")
 
-    setattr(self, f"lyrBtn{lyr}", Button(fr, text=lyr, padx=10, background=self.qaClrFail, command=lambda:self.showLyrDetails(lyr))) #, command=lambda:self.showLyr(owner, getattr(self, f"lyrBtn{lyr}").get())
+    # setattr(self, f"lyr{lyr}", Label(fr, text=lyr, padx=10, background="white")) #, command=lambda:self.showLyr(owner, getattr(self, f"lyr{lyr}").get())
+    # getattr(self, f"lyr{lyr}").grid(row=rowNum, column=col, sticky="W", padx=5, pady=1)
+    # self.currentLyrs.append(getattr(self, f"lyr{lyr}"))
+
+    setattr(self, f"lyrBtn{lyr}", Button(fr, text=lyr, padx=10, background="snow3", command=lambda:self.showLyrDetails(sch, lyr))) #, command=lambda:self.showLyr(owner, getattr(self, f"lyrBtn{lyr}").get())
     #setattr(self, f"lyrBtn{lyr}", Button(None, textvariable="test", width=8, height=1, padx=1, relief="solid", background=self.qaClrFail))
     getattr(self, f"lyrBtn{lyr}").grid(row=rowNum, column=col, sticky="W", padx=5, pady=1)
     self.currentLyrs.append(getattr(self, f"lyrBtn{lyr}"))
   ###########################################################################
   ###########################################################################
 
-  def showLyrDetails(self, lyr):
+  def showLyrDetails(self, sch, lyr):
     print(lyr)
-
-    # change the layer button colours and remove the current layer details
+    # change the layer button colours
     if self.currentLyrBtn:
-      self.currentLyrBtn.config(background=self.qaClrFail)
+      self.currentLyrBtn.config(background="snow3")
     self.currentLyrBtn = getattr(self, f"lyrBtn{lyr}")
-    self.currentLyrBtn.config(background=self.qaClrPass)
+    self.currentLyrBtn.config(background="white")
 
-    self.lyrInfo.insert(INSERT, lyr)
+    #placeholder
+    self.lyrInfo.delete('1.0', END)
+
+
+    api = ApiUtils(self.guic.config.get('baseUrl'), self.guic.config.get('api_key'), self.guic.config.get('client_id'))
+    resp = api.post("data",
+      {
+        "dset": f"{sch}.{lyr}"
+       }
+    )
+
+    print(resp)
+
+    #placeholder
+    self.lyrInfo.insert(INSERT, str(resp))
 
 
   
