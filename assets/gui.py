@@ -1,7 +1,9 @@
-from tkinter import ttk, Tk, Button, Checkbutton, Frame, Label, Entry, Text, StringVar, IntVar, END, Scrollbar, Canvas, INSERT
+from tkinter import *
+from tkinter import ttk
 # import tkinter as tk
 import logging, traceback
 from copy import deepcopy
+import webbrowser
 
 from .utils_db import DB, PGClient
 from .setup import QA
@@ -20,9 +22,9 @@ class GUI(Tk):
     
     self.title("Vicmap Replication Service")
     self.configure(background="brown")
-    self.minsize(485, 630)  # width, height
+    self.minsize(630, 855)  # width, height
     # self.maxsize(495, 590)
-    self.geometry("300x300+500+500")  # width x height + x + y
+    self.geometry("300x300")  # width x height + x + y
 
     # https://www.google.com/search?q=tkinter+colours
     self.qaClrFail = 'orange'
@@ -36,7 +38,10 @@ class GUI(Tk):
       "TNotebook.Tab": {"configure": {"padding": [72, 10], "background":'skyblue', "font" : ('URW Gothic L', '11', 'bold')},},
       "bad.TNotebook.Tab": {"configure": {"padding": [72, 10], "background":'brown', "font" : ('URW Gothic L', '11', 'bold')},},
       "TFrame": {"configure": {"background":'skyblue'}},
-      "bad.TFrame": {"configure": {"background":'skyblue'}}
+      "bad.TFrame": {"configure": {"background":'skyblue'}},
+      "lyrInfo.TFrame": {"configure": {"background": "white"}},
+      "metaLink.TLabel": {"configure": {"background": "white", "font" : ('Sans','10','bold', 'underline')}},
+      "treeHeading.TLabel": {"configure": {"background": "white", "font" : ('Sans','9','bold')}}
     })
     self.style.theme_use("MyStyle")
 
@@ -46,6 +51,10 @@ class GUI(Tk):
     
     ##########
     tabs = ttk.Notebook(self)
+    tabs.grid(row=0, column=0, sticky='nsew')
+    self.columnconfigure(0,weight=1)
+    self.rowconfigure(0,weight=1)
+
     tSetup = ttk.Frame(tabs, style='bad.TFrame')
     tabs.add(tSetup, text='VRS Setup & QA')
     self.popSetupFrame(tSetup)
@@ -54,7 +63,8 @@ class GUI(Tk):
     tabs.add(tMeta, text='MetaData')
     self.popMetaFrame(tMeta)
 
-    tabs.grid(row=0, column=0)
+    # tabs.grid(row=0, column=0, sticky='nsew')
+
     # tabs.pack(sticky='nsew')
 
     # tSetup.config(style='Good')
@@ -117,13 +127,14 @@ class GUI(Tk):
     self.lyrCanvas.bind_all("<MouseWheel>", self._on_lyr_mousewheel)
 
     print(rowNum)
-    self.lyrInfo = Text(owner, border=1, background='white', padx=5, pady=5, width=50, height=18)
-    self.lyrInfo.grid(row=self.nrSchHalf+1, column=0, columnspan=4, padx=10, pady=10, sticky="nsew")
+    self.lyrInfoFrame = ttk.Frame(owner, border=5, style='lyrInfo.TFrame')
+    self.lyrInfoFrame.grid(row=self.nrSchHalf+1, column=0, columnspan=4, padx=10, pady=10, sticky="nsew")
+    owner.rowconfigure(self.nrSchHalf+1, weight=1)
 
   def mkSchBtn(self, owner, sch, row, col):
     # self.syncBtn = Button(fr, text='SYNC', font=(72), padx=30, relief="solid", background="salmon", command=self.guic.sync)
     setattr(self, f"sch{sch}", StringVar(value=sch))
-    setattr(self, f"btn{sch}", ttk.Button(owner, textvariable=getattr(self, f"sch{sch}"), width=8, height=1, padx=1, relief="solid", background=self.qaClrFail))
+    setattr(self, f"btn{sch}", Button(owner, textvariable=getattr(self, f"sch{sch}"), width=8, height=1, padx=1, relief="solid", background=self.qaClrFail))
     getattr(self, f"btn{sch}").config(command=lambda:self.showSch(owner, getattr(self, f"sch{sch}").get()))
     # self.syncBtn.
     getattr(self, f"btn{sch}").grid(row=row, column=col, sticky="W", padx=5)#, pady=(2,0))
@@ -168,6 +179,7 @@ class GUI(Tk):
 
     #print(self.lyrFrame.children)
     
+    self.lyrScrollbar = Scrollbar(owner, orient="vertical", command=self.lyrCanvas.yview)
     self.lyrScrollbar.grid(row=0, column=3, rowspan=self.nrSchHalf+1, sticky="ns")
     self.lyrCanvas.configure(yscrollcommand=self.lyrScrollbar.set, background='skyblue')
     # print(f"showSch2: {self.lyrCanvas.bbox}")
@@ -195,8 +207,9 @@ class GUI(Tk):
     self.currentLyrBtn = getattr(self, f"lyrBtn{lyr}")
     self.currentLyrBtn.config(background="white")
 
-    #placeholder
-    self.lyrInfo.delete('1.0', END)
+    # clear frame
+    for widget in self.lyrInfoFrame.winfo_children():
+      widget.destroy()
 
 
     api = ApiUtils(self.guic.config.get('baseUrl'), self.guic.config.get('api_key'), self.guic.config.get('client_id'))
@@ -206,10 +219,74 @@ class GUI(Tk):
        }
     )
 
-    print(resp)
+    self.layerMetaLink = ttk.Label(self.lyrInfoFrame, text=f'ISO 19115 Metadata', cursor='hand2', style='metaLink.TLabel')
+    self.layerMetaLink.grid(row=0, column=0, columnspan=4, sticky='w')
+    self.layerMetaLink.bind("<Button-1>", lambda e: webbrowser.open_new(resp['metadata']))
 
-    #placeholder
-    self.lyrInfo.insert(INSERT, str(resp))
+
+    ## Table Columns
+    self.layerColumnTreeLabel = ttk.Label(self.lyrInfoFrame, text='Columns', style='treeHeading.TLabel')
+    self.layerColumnTreeLabel.grid(row=1, column=0, columnspan=3, sticky='w')
+
+    self.layerColumnTree = ttk.Treeview(self.lyrInfoFrame, columns=('column', 'type'), show='headings')
+    self.layerColumnTree.heading('column', text='Column')
+    self.layerColumnTree.column('column', minwidth=0, width=150, stretch=True)
+    self.layerColumnTree.heading('type', text='Type')
+    self.layerColumnTree.column('type', minwidth=0, width=200, stretch=True)
+
+    for col in resp['columns']:
+      self.layerColumnTree.insert('', END, value=(col, resp['columns'][col]))
+
+    self.layerColumnTree.grid(row=2, column=0, columnspan=2, sticky='nsew')
+
+    self.layerColumnTreeScrollBar = Scrollbar(self.lyrInfoFrame, orient='vertical', command=self.layerColumnTree.yview)
+    self.layerColumnTree.configure(yscrollcommand=self.layerColumnTreeScrollBar.set)
+    self.layerColumnTreeScrollBar.grid(row=2, column=2, sticky='ns', padx=(0,3))
+
+
+    ## Table Indexes
+    self.layerIndexTreeLabel = ttk.Label(self.lyrInfoFrame, text='Indexes', style='treeHeading.TLabel')
+    self.layerIndexTreeLabel.grid(row=1, column=3, columnspan=3, sticky='w')
+
+    self.layerIndexTree = ttk.Treeview(self.lyrInfoFrame, columns=('column', 'type'), show='headings')
+    self.layerIndexTree.column('column', minwidth=0, width=125, stretch=True)
+    self.layerIndexTree.heading('column', text='Column')
+    self.layerIndexTree.heading('type', text='Type')
+    self.layerIndexTree.column('type', minwidth=0, width=75, stretch=True)
+
+    for index in resp['indexes']:
+      self.layerIndexTree.insert('', END, value=(index[1], index[2]))
+
+    self.layerIndexTree.grid(row=2, column=3, columnspan=2, sticky='nsew')
+
+    self.layerIndexTreeScrollBar = Scrollbar(self.lyrInfoFrame, orient='vertical', command=self.layerIndexTree.yview)
+    self.layerIndexTree.configure(yscrollcommand=self.layerIndexTreeScrollBar.set)
+    self.layerIndexTreeScrollBar.grid(row=2, column=5, sticky='ns')
+
+
+    ## Dump History Tree
+    self.dumpHistoryTreeLabel = ttk.Label(self.lyrInfoFrame, text='Update History', style='treeHeading.TLabel')
+    self.dumpHistoryTreeLabel.grid(row=3, column=0, columnspan=3, sticky='w', pady=(5,0))
+
+    self.dumpHistoryTree = ttk.Treeview(self.lyrInfoFrame, columns=('dump_number', 'type', 'date'), show='headings')
+    self.dumpHistoryTree.column('dump_number', minwidth=0, width=125, stretch=True)
+    self.dumpHistoryTree.heading('dump_number', text='Update Number')
+    self.dumpHistoryTree.heading('type', text='Update Type')
+    self.dumpHistoryTree.column('type', minwidth=0, width=75, stretch=True)
+    self.dumpHistoryTree.heading('date', text='Date')
+    self.dumpHistoryTree.column('date', minwidth=0, width=150, stretch=True)
+
+    #pgdumps arrive in ascending order, sorting by descending update number
+    resp['pgDumps'].sort(key = lambda x:x[2], reverse=True)
+
+    for dump in resp['pgDumps']:
+      self.dumpHistoryTree.insert('', END, value=(dump[2], dump[1], dump[3]))
+
+    self.dumpHistoryTree.grid(row=4, column=0, columnspan=5, sticky='nsew')
+
+    self.dumpHistoryTreeScrollBar = Scrollbar(self.lyrInfoFrame, orient='vertical', command=self.dumpHistoryTree.yview)
+    self.dumpHistoryTree.configure(yscrollcommand=self.dumpHistoryTreeScrollBar.set)
+    self.dumpHistoryTreeScrollBar.grid(row=4, column=5, sticky='ns')
 
 
   
