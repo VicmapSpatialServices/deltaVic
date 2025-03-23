@@ -390,7 +390,7 @@ class GUI(Tk):
     self.lblCltHdr = Label(frm, text=title, background=bgClr.get())
     self.lblCltHdr.grid(row=0, column=0, columnspan=3, sticky='W', pady=(0,5))
     Button(frm, text='Test Restore', command=self.guic.testPgc).grid(row=0, column=1, sticky="E", pady=(0,5))
-    self.lblEnt(frm, bgClr, 'binPath', 'Bin Path', 'C:\Program Files\PostgreSQL\\17\\bin', 60, 1, 0)
+    self.lblEnt(frm, bgClr, 'binPath', 'Bin Path', 'C:\\Program Files\\PostgreSQL\\17\\bin', 60, 1, 0)
     return (frm, self.lblCltHdr, self.lblbinPath)
   
   def mkRegFrm(self, frm, bgClr):
