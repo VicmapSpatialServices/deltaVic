@@ -138,3 +138,17 @@ Ensure that the process is not already running when instantiating.
 If configured correctly, the incremental update each week for vicmap should take about 10 minutes for all datasets, significantly less if you are not synccing all the tables. If it takes longer please reach out to us with any observations.
 
 The Vicmap data generally updates on a Friday night after business hours. You could always just kick this off manually every Monday monring to bring your data into sync.
+
+## Docker Installation
+
+To build a containerised version of the application using docker, run the following command from the project's root directory:
+
+```console
+docker build -t deltavic .
+```
+
+The deltaVic commands can then be run like so:
+
+```console
+docker run deltavic sync
+```
