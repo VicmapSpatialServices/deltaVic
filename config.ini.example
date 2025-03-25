@@ -1,0 +1,13 @@
+[default]
+name = deltaVic
+log_level = 20
+email =
+baseUrl =
+dbHost =
+dbPort =
+dbUser =
+dbPswd =
+dbName =
+dbClientPath =
+client_id =
+api_key =
