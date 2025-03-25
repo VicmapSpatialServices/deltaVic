@@ -41,7 +41,7 @@ class PGClient():
     logging.debug(f"platform: {plfm}")
 
     # NB: This block is a mess due to earlier exhaustive testing reuired on aws al2 machines
-    if platform.system().lower() == "linux":
+    if platform.system().lower() == "linux" and "LIB_PATH" in os.environ.keys():
       library_root = os.environ["LIB_PATH"]
       logging.debug(f"pgsql_search_key: {pgsql_search_key}")
       logging.debug("LD_LIBRARY_PATH: " + os.environ["LD_LIBRARY_PATH"])
