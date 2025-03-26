@@ -209,57 +209,50 @@ class GUI(Tk):
     for widget in self.lyrInfoFrame.winfo_children():
       widget.destroy()
 
+    layerMeta = self.guic.getLyrMetadata(sch, lyr)
 
-    api = ApiUtils(self.guic.config.get('baseUrl'), self.guic.config.get('api_key'), self.guic.config.get('client_id'))
-    resp = api.post("data",
-      {
-        "dset": f"{sch}.{lyr}"
-       }
-    )
-
-    self.layerMetaLink = ttk.Label(self.lyrInfoFrame, text=f'ISO 19115 Metadata', cursor='hand2', style='metaLink.TLabel')
-    self.layerMetaLink.grid(row=0, column=0, columnspan=4, sticky='w')
-    self.layerMetaLink.bind("<Button-1>", lambda e: webbrowser.open_new(resp['metadata']))
+    layerMetaLink = ttk.Label(self.lyrInfoFrame, text=f'ISO 19115 Metadata', cursor='hand2', style='metaLink.TLabel')
+    layerMetaLink.grid(row=0, column=0, columnspan=4, sticky='w')
+    layerMetaLink.bind("<Button-1>", lambda e: webbrowser.open_new(layerMeta['metadata']))
 
 
     ## Table Columns
-    self.layerColumnTreeLabel = ttk.Label(self.lyrInfoFrame, text='Columns', style='treeHeading.TLabel')
-    self.layerColumnTreeLabel.grid(row=1, column=0, columnspan=3, sticky='w')
+    ttk.Label(self.lyrInfoFrame, text='Columns', style='treeHeading.TLabel').grid(row=1, column=0, columnspan=3, sticky='w')
 
-    self.layerColumnTree = ttk.Treeview(self.lyrInfoFrame, columns=('column', 'type'), show='headings')
-    self.layerColumnTree.heading('column', text='Column')
-    self.layerColumnTree.column('column', minwidth=0, width=150, stretch=True)
-    self.layerColumnTree.heading('type', text='Type')
-    self.layerColumnTree.column('type', minwidth=0, width=200, stretch=True)
+    layerColumnTree = ttk.Treeview(self.lyrInfoFrame, columns=('column', 'type'), show='headings')
+    layerColumnTree.heading('column', text='Column')
+    layerColumnTree.column('column', minwidth=0, width=150, stretch=True)
+    layerColumnTree.heading('type', text='Type')
+    layerColumnTree.column('type', minwidth=0, width=200, stretch=True)
 
-    for col in resp['columns']:
-      self.layerColumnTree.insert('', END, value=(col, resp['columns'][col]))
+    for col in layerMeta['columns']:
+      layerColumnTree.insert('', END, value=(col, layerMeta['columns'][col]))
 
-    self.layerColumnTree.grid(row=2, column=0, columnspan=2, sticky='nsew')
+    layerColumnTree.grid(row=2, column=0, columnspan=2, sticky='nsew')
 
-    self.layerColumnTreeScrollBar = Scrollbar(self.lyrInfoFrame, orient='vertical', command=self.layerColumnTree.yview)
-    self.layerColumnTree.configure(yscrollcommand=self.layerColumnTreeScrollBar.set)
-    self.layerColumnTreeScrollBar.grid(row=2, column=2, sticky='ns', padx=(0,3))
+    layerColumnTreeScrollBar = Scrollbar(self.lyrInfoFrame, orient='vertical', command=layerColumnTree.yview)
+    layerColumnTree.configure(yscrollcommand=layerColumnTreeScrollBar.set)
+    layerColumnTreeScrollBar.grid(row=2, column=2, sticky='ns', padx=(0,3))
 
 
     ## Table Indexes
-    self.layerIndexTreeLabel = ttk.Label(self.lyrInfoFrame, text='Indexes', style='treeHeading.TLabel')
-    self.layerIndexTreeLabel.grid(row=1, column=3, columnspan=3, sticky='w')
+    layerIndexTreeLabel = ttk.Label(self.lyrInfoFrame, text='Indexes', style='treeHeading.TLabel')
+    layerIndexTreeLabel.grid(row=1, column=3, columnspan=3, sticky='w')
 
-    self.layerIndexTree = ttk.Treeview(self.lyrInfoFrame, columns=('column', 'type'), show='headings')
-    self.layerIndexTree.column('column', minwidth=0, width=125, stretch=True)
-    self.layerIndexTree.heading('column', text='Column')
-    self.layerIndexTree.heading('type', text='Type')
-    self.layerIndexTree.column('type', minwidth=0, width=75, stretch=True)
+    layerIndexTree = ttk.Treeview(self.lyrInfoFrame, columns=('column', 'type'), show='headings')
+    layerIndexTree.column('column', minwidth=0, width=125, stretch=True)
+    layerIndexTree.heading('column', text='Column')
+    layerIndexTree.heading('type', text='Type')
+    layerIndexTree.column('type', minwidth=0, width=75, stretch=True)
 
-    for index in resp['indexes']:
-      self.layerIndexTree.insert('', END, value=(index[1], index[2]))
+    for index in layerMeta['indexes']:
+      layerIndexTree.insert('', END, value=(index[1], index[2]))
 
-    self.layerIndexTree.grid(row=2, column=3, columnspan=2, sticky='nsew')
+    layerIndexTree.grid(row=2, column=3, columnspan=2, sticky='nsew')
 
-    self.layerIndexTreeScrollBar = Scrollbar(self.lyrInfoFrame, orient='vertical', command=self.layerIndexTree.yview)
-    self.layerIndexTree.configure(yscrollcommand=self.layerIndexTreeScrollBar.set)
-    self.layerIndexTreeScrollBar.grid(row=2, column=5, sticky='ns')
+    layerIndexTreeScrollBar = Scrollbar(self.lyrInfoFrame, orient='vertical', command=layerIndexTree.yview)
+    layerIndexTree.configure(yscrollcommand=layerIndexTreeScrollBar.set)
+    layerIndexTreeScrollBar.grid(row=2, column=5, sticky='ns')
 
 
     ## Dump History Tree
@@ -275,9 +268,9 @@ class GUI(Tk):
     self.dumpHistoryTree.column('date', minwidth=0, width=150, stretch=True)
 
     #pgdumps arrive in ascending order, sorting by descending update number
-    resp['pgDumps'].sort(key = lambda x:x[2], reverse=True)
+    layerMeta['pgDumps'].sort(key = lambda x:x[2], reverse=True)
 
-    for dump in resp['pgDumps']:
+    for dump in layerMeta['pgDumps']:
       self.dumpHistoryTree.insert('', END, value=(dump[2], dump[1], dump[3]))
 
     self.dumpHistoryTree.grid(row=4, column=0, columnspan=5, sticky='nsew')
@@ -308,6 +301,7 @@ class GUI(Tk):
     # self.cntrlFrmBg = StringVar(value=self.qaClrFail)
     self.cntrlFrame = Frame(owner, borderwidth=5, relief="raised")#, width=150, height=100)#, width=300, height=300)
     self.cntrlFrame.grid(row=2, column=0, columnspan=2, padx=5, pady=5, sticky='nsew')
+    owner.columnconfigure(1, weight=1)
     self.cntrlFrm(self.cntrlFrame)#self.cntrlFrmBg)
     ##
     self.dbFrmBg = StringVar(value=self.qaClrFail)
@@ -339,8 +333,6 @@ class GUI(Tk):
     self.syncBtn = Button(fr, text='SYNC', font=(72), padx=30, relief="solid", background="OliveDrab3", command=self.guic.sync)
     self.syncBtn.grid(row=2, column=3)#, padx=5, pady=5)#.pack(side='top', fill='none', padx=5, pady=(15,0))
     # Button(tSetup, text='SYNC', font=(288), command=self.sync).grid(row=1, column=0)
-    self.openCloseBtn = Button(fr, text="Close", font=(288), command=self.dbOpenClose)
-    self.openCloseBtn.grid(row=0, column=6, sticky='E', padx=5, pady=5)
     
     qaFr = Frame(fr, borderwidth=1, relief="solid")
     Label(qaFr, text='QA', font=(32)).grid(row=0, column=0, columnspan=2, pady=2)
@@ -488,20 +480,6 @@ class GUI(Tk):
     self.syncBtn.config(background='OliveDrab3')
     
   ###########################################################################
-
-  def dbOpenClose(self):#, event):
-    print(self.qaDb.get())
-    self.openCloseBtn.configure(text='Open' if not self.qaDb.get() else 'Close')
-    self.qaDb.set(1) if not self.qaDb.get() else self.qaDb.set(0)
-    # self.regFrmBg.set('OliveDrab3')
-    # self.dbFrm.config(background='OliveDrab3')
-    self.style.configure('TFrame', background='brown')
-
-    self.guic.updateDBCounts()
-    
-    self.update_idletasks()
-    # print(self.regFrmBg.get())
-    #self.destroy()
   
 class GuiControl():
   def __init__(self, gui, stg):
@@ -624,6 +602,14 @@ class GuiControl():
       self.gui.dsetCnt.config(text="   ")
       self.gui.activeCnt.config(text="   ")
       self.gui.errCnt.config(text="   ")
+
+  def getLyrMetadata(self, sch, lyr):
+    api = ApiUtils(self.config.get('baseUrl'), self.config.get('api_key'), self.config.get('client_id'))
+    return api.post("data",
+      {
+        "dset": f"{sch}.{lyr}"
+       }
+    )
 
 if __name__ == "__main__":
   gui = GUI(None, None)
