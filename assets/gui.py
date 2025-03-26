@@ -33,7 +33,7 @@ class GUI(Tk):
     self.bgClrPass = 'skyblue'
     
     self.style = ttk.Style()
-    self.style.theme_create( "MyStyle", parent="alt", settings={
+    self.style.theme_create( "MyStyle", parent="default", settings={
       "TNotebook": {"configure": {"tabmargins": [2, 5, 2, 0] } },
       "TNotebook.Tab": {"configure": {"padding": [72, 10], "background":'skyblue', "font" : ('URW Gothic L', '11', 'bold')},},
       "bad.TNotebook.Tab": {"configure": {"padding": [72, 10], "background":'brown', "font" : ('URW Gothic L', '11', 'bold')},},
@@ -84,6 +84,21 @@ class GUI(Tk):
   def _on_lyr_mousewheel(self, event):
    self.lyrCanvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
+  def configureLyrCanvasAndFrame(self, owner):
+    self.lyrCanvas = Canvas(owner, width=300, background='red')
+    self.lyrFrame = ttk.Frame(self.lyrCanvas, style='bad.TFrame')#, width=50)
+
+    self.lyrCanvas.bind('<Enter>', lambda e: self.lyrCanvas.bind_all("<MouseWheel>", self._on_lyr_mousewheel))
+    self.lyrCanvas.bind('<Leave>', lambda e: self.lyrCanvas.unbind_all("<MouseWheel>"))
+
+    self.lyrFrame.bind("<Configure>", lambda e: self.lyrCanvas.configure(scrollregion=self.lyrCanvas.bbox("all")))
+    self.lyrScrollbar = Scrollbar(owner, orient="vertical", command=self.lyrCanvas.yview)
+
+    owner.columnconfigure(1, weight=1)
+    owner.rowconfigure(1)#, weight=1)
+    self.lyrFrame.columnconfigure(0, weight=1)
+    self.lyrFrame.rowconfigure(0)#, weight=1)
+
   def popMetaFrame(self, owner):
     self.currentLyrs = []
     self.currentSchBtn = None
@@ -109,22 +124,7 @@ class GUI(Tk):
     # self.lyrFrame = Frame(owner, borderwidth=1, relief="flat", width=250, height=400)
     # self.lyrFrame.grid(row=1, rowspan=rowNum, column=1, sticky='nsew')
     
-    self.lyrCanvas = Canvas(owner, width=200, background='red')
-    self.lyrFrame = ttk.Frame(self.lyrCanvas, style='bad.TFrame')#, width=50)
-    # self.lyrFrame.configure(background='skyblue')
-    self.lyrFrame.bind("<Configure>", lambda e: self.lyrCanvas.configure(scrollregion=self.lyrCanvas.bbox("all")))
-    self.lyrScrollbar = Scrollbar(owner, orient="vertical", command=self.lyrCanvas.yview)
-    # print(f"popMetaFr: {self.lyrCanvas.bbox}")
-    # print(f"popMetaFr: {self.lyrCanvas.yview}")
-
-    owner.columnconfigure(1, weight=1)
-    owner.rowconfigure(1)#, weight=1)
-    self.lyrFrame.columnconfigure(0, weight=1)
-    self.lyrFrame.rowconfigure(0)#, weight=1)
-
-    # lyrScrollbar=Scrollbar(self.lyrFrame, orient="vertical")
-    # lyrScrollbar.pack(side="right",fill="y")
-    self.lyrCanvas.bind_all("<MouseWheel>", self._on_lyr_mousewheel)
+    self.configureLyrCanvasAndFrame(owner)
 
     print(rowNum)
     self.lyrInfoFrame = ttk.Frame(owner, border=5, style='lyrInfo.TFrame')
@@ -157,9 +157,7 @@ class GUI(Tk):
 
     # TODO: Redo this, reset the height or something else instead.
     # Re-instantiate layer frame to reset height
-    self.lyrCanvas = Canvas(owner, width=300)#, background='skyblue')
-    self.lyrFrame = ttk.Frame(self.lyrCanvas, style='bad.TFrame')#, width=50)
-    self.lyrFrame.bind("<Configure>", lambda e: self.lyrCanvas.configure(scrollregion=self.lyrCanvas.bbox("all")))
+    self.configureLyrCanvasAndFrame(owner)
 
     # self.lyrScrollbar = Scrollbar(owner, orient="vertical", command=self.lyrCanvas.yview)
     # self.lyrCanvas.bind_all("<MouseWheel>", self._on_lyr_mousewheel)   
