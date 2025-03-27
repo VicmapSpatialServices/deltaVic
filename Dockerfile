@@ -25,4 +25,7 @@ WORKDIR /deltaVic
 # Install python requirements
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Set the python stdout to be unbuffered
+ENV PYTHONUNBUFFERED=1
+
 ENTRYPOINT ["python3", "deltaVic.py"]
