@@ -65,7 +65,7 @@ class FileUtils():
     # ["chmod","-R","a+rw",dir] -- set read/write recursive on dir
     # ["chmod","-R","a+r",dir] -- set read recursive on dir
     # the following will not pick up things that are on the path, hence the exceptions.
-    if params[0] not in ['uname','ps','scp','env','chmod','pg_restore','pg_dump'] and not os.path.exists(params[0]):
+    if params[0] not in ['uname','ps','scp','env','chmod','pg_restore','pg_dump','psql'] and not os.path.exists(params[0]):
       raise Exception(f"Path {params[0]} does not exist")
     
     proc = Popen(params, stderr=PIPE, stdout=PIPE)
@@ -79,6 +79,11 @@ class FileUtils():
     
     return _msgStr
   
+  @staticmethod
+  def runSubprocess(command):
+    import subprocess
+    subprocess.call(command)
+
 class Logger():
   @staticmethod
   def get():
