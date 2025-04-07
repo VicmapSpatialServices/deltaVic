@@ -92,7 +92,38 @@ class Synccer():
   def dump(self, lyrQual):
     fPath = f"temp/{lyrQual}.dmp"
     PGClient(self.db, self.config.get('dbClientPath')).dump_file(lyrQual, fPath)
+    return fPath
 
+  def upload(self, srcQual, supType):#, expDb=None):#fPath):
+    try:
+      sch, tbl = srcQual.split('.')
+      tgtQual = f'miscsupply.{tbl}'
+      # # export the file
+      fPath = f"temp/{srcQual}.dmp"
+      
+      # copy layer to miscsupply schema then dump it. Should include indexes.
+      self.db.copyTable(srcQual, tgtQual)
+      # dump from miscsupply schema.
+      logging.info(f"{tgtQual}, {fPath}")
+      PGClient(self.db, self.config.get('dbClientPath')).dump_file(tgtQual, fPath)
+      # remove migration artifacts
+      self.db.dropTable(tgtQual)
+      logging.info(fPath)
+
+      #register the upload on VLRS and get an s3promise-link
+      api = ApiUtils(self.config.get('baseUrl'), self.config.get('api_key'), self.config.get('client_id'))
+      data = {"dset":srcQual,"fname":fPath,"sup_type":supType}
+      result = api.post('upload', data)
+      if s3promiseLink := result.get('uploadPromise'):
+        api.put(s3promiseLink, fPath)
+        # FU.remove(fPath) # clean up file.
+      else:
+        raise Exception(f"S3 put_object failed")
+      
+      return f"Successfully uploaded {fPath}"
+    
+    except Exception as ex:
+      return f"Failed to upload {fPath}: {str(ex)}"
     
 ###########################################################################
                      ### y   y N    N CCCCC
@@ -103,6 +134,8 @@ class Synccer():
 ###########################################################################
 
 class Sync():
+  DATAPATH = 'temp'
+
   def __init__(self, db, config, lyr, haltStates, tracker):
     self.db = db
     self.config = config
@@ -134,10 +167,10 @@ class Sync():
     _rsp = api.post("data", {"dset":self.lyr.identity,"sup_ver":self.lyr.sup_ver})
     if not (_next := _rsp.get("next")):
       if self.lyr.sup_ver == _rsp.get("sup_ver"): # have the latest already
-        logging.warn("Requested data load but endpoint says max(sup_ver) is current")
+        logging.warning("Requested data load but endpoint says max(sup_ver) is current")
         self.db.execute(*self.lyr.upStatusSql(LyrReg.COMPLETE))
       else:
-        logging.warn("Requested data load but endpoint says next ready only half ready yet")
+        logging.warning("Requested data load but endpoint says next ready only half ready yet")
         self.db.execute(*self.lyr.upStatusSql(LyrReg.WAIT))
       return
     
@@ -150,8 +183,8 @@ class Sync():
 
   def download(self):
     logging.debug(F" -> download-ing {self.lyr.identity}")
-    if not os.path.exists("temp"): os.makedirs("temp")
-    fPath = f"temp/{self.lyr.extradata['filename']}"
+    if not os.path.exists(self.DATAPATH): os.makedirs(self.DATAPATH)
+    fPath = f"{self.DATAPATH}/{self.lyr.extradata['filename']}"
     ApiUtils.download_file(self.lyr.extradata['s3_url'], fPath)
     
     self.db.execute(*self.lyr.delExtraKey('s3_url')) # remove s3_url from extradata as we are done with it now.
@@ -160,7 +193,7 @@ class Sync():
   def restore(self):
     # restore the file - full loads go straight to each vicmap schema, incs go to the vm_delta schema.
     # logging.debug(f"restore version: {PGClient(self.db, self.config.get('dbClientPath')).get_restore_version()}") # test pg connection.
-    fPath = f"temp/{self.lyr.extradata['filename']}"
+    fPath = f"{self.DATAPATH}/{self.lyr.extradata['filename']}"
     PGClient(self.db, self.config.get('dbClientPath')).restore_file(fPath)
     
     if self.lyr.sup_type == Supplies.FULL:
@@ -218,7 +251,7 @@ class Sync():
     logging.debug(F" -> clean-ing {self.lyr.identity}")
     if self.lyr.sup_type == Supplies.INC:
       self.db.dropTable(self.lyr.extradata['filename'].replace('.dmp',''))
-    FU.remove(f"temp/{self.lyr.extradata['filename']}")
+    FU.remove(f"{self.DATAPATH}/{self.lyr.extradata['filename']}")
     # status->COMPLETE or err=true
     self.db.execute(*self.lyr.upStatusSql(LyrReg.COMPLETE))
 
@@ -234,4 +267,3 @@ class Sync():
     _tms = lyr.extradata[tms] if tms in lyr.extradata else {}
     _tms.update({status:duration}) # overwrite
     self.db.execute(*lyr.upExtraSql({tms:_tms}))
-    
