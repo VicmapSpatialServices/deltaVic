@@ -94,7 +94,9 @@ class Synccer():
     PGClient(self.db, self.config.get('dbClientPath')).dump_file(lyrQual, fPath)
     return fPath
 
-  def upload(self, srcQual, supType):#, expDb=None):#fPath):
+  def upload(self, srcQual, supType, relation='table', md_uuid=None, geomType=None): # 3 optional parameters for initial uploads (creates). (Not strictly necessary).
+    # eg sync.upload('vmadd.address', Supplies.INC)
+    logging.info(f"uploading {srcQual} to VLRS")
     try:
       sch, tbl = srcQual.split('.')
       tgtQual = f'miscsupply.{tbl}'
@@ -104,27 +106,32 @@ class Synccer():
       # copy layer to miscsupply schema then dump it. Should include indexes.
       self.db.copyTable(srcQual, tgtQual)
       # dump from miscsupply schema.
-      logging.info(f"{tgtQual}, {fPath}")
+      logging.debug(f"{tgtQual}, {fPath}")
       PGClient(self.db, self.config.get('dbClientPath')).dump_file(tgtQual, fPath)
-      # remove migration artifacts
-      self.db.dropTable(tgtQual)
-      logging.info(fPath)
-
+      
       #register the upload on VLRS and get an s3promise-link
+      data = {"dset":srcQual,"fname":fPath,"sup_type":supType, "relation":relation}
+      if md_uuid: data.update({"md_uuid":md_uuid})
+      if geomType: data.update({"geomType":geomType})
+
       api = ApiUtils(self.config.get('baseUrl'), self.config.get('api_key'), self.config.get('client_id'))
-      data = {"dset":srcQual,"fname":fPath,"sup_type":supType}
       result = api.post('upload', data)
       if s3promiseLink := result.get('uploadPromise'):
         api.put(s3promiseLink, fPath)
-        # FU.remove(fPath) # clean up file.
       else:
         raise Exception(f"S3 put_object failed")
       
-      return f"Successfully uploaded {fPath}"
+      # remove the migration artifacts
+      self.db.dropTable(tgtQual)
+      FU.remove(fPath) # clean up the dumpfile
+      
+      return True # f"Successfully uploaded {fPath}"
     
     except Exception as ex:
-      return f"Failed to upload {fPath}: {str(ex)}"
-    
+      errStr = f"Failed to upload {fPath}: {str(ex)}"
+      logging.error(errStr)
+      return False # 
+
 ###########################################################################
                      ### y   y N    N CCCCC
                      #   y   y NN   N C

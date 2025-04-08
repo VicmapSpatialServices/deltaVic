@@ -82,7 +82,8 @@ class FileUtils():
   @staticmethod
   def runSubprocess(command):
     import subprocess
-    subprocess.call(command)
+    devnull = open(os.devnull, 'w')
+    subprocess.call(command, stdout=devnull)
 
 class Logger():
   @staticmethod

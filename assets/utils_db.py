@@ -17,82 +17,36 @@ class PGClient():
     self.dbClientPath = dbClientPath
 
     """Database connections manages using PGPASSFILE as outlined in https://www.postgresql.org/docs/9.3/libpq-pgpass.html"""
-    pgpassFileName = ".vicmap_load_{0}.pgpgpass".format(str(time.time()).replace(".", ""))
-    self.pgpass_file = os.path.join(Path.home(), pgpassFileName)
-    if not os.path.exists(Path.home()):
-      if platform.system().lower() == "linux":
-        self.pgpass_file = os.path.join("/tmp", pgpassFileName)
-      else:
-        self.pgpass_file = os.path.join("C:\\temp", pgpassFileName)
-
-    os.environ["PGPASSFILE"] = self.pgpass_file
-    # os.environ["PGPASSWORD"] = "vicmap"
+    pgpassFileName = f".{db.dbname}_{str(time.time()).replace(".", "")}.pgpgpass"
+    self.pgPassPath = os.path.join(dPath, pgpassFileName)
     
-    self.checkEnv(dPath)
-
   def clientPath(self, client):
     path = os.path.join(self.dbClientPath, client)
     if platform.system().lower() == 'windows':
       path += '.exe'
     return path
   
-  def checkEnv(self, dPath):
-    if not os.path.exists(dPath): os.mkdir(dPath)  
-    
-    if "LIB_PATH" in os.environ.keys():
-      logging.debug("Library data path: {0}".format(os.environ["LIB_PATH"]))
-
-    #Check enviroment variables set for pgsql
-    PGSQL_APPLICATION_NAME = "pgsql"
-    pgsql_search_key = "/{0}".format(PGSQL_APPLICATION_NAME)
-    plfm = platform.system().lower()
-    logging.info(f"platform: {plfm}")
-
-    # NB: This block is a mess due to earlier exhaustive testing required on aws al2 machines
-    if platform.system().lower() == "linux":
-      library_root = os.environ["LIB_PATH"]
-      logging.debug(f"pgsql_search_key: {pgsql_search_key}")
-      logging.debug("LD_LIBRARY_PATH: " + os.environ["LD_LIBRARY_PATH"])
-      logging.debug("PATH: " + os.environ["PATH"])
-      if pgsql_search_key not in os.environ["LD_LIBRARY_PATH"] or pgsql_search_key not in os.environ["PATH"] :
-        pgsql_dir_bin = None
-        pgsql_dir_lib = None
-        logging.debug("Searching {0} to find pgsql ...".format(library_root))
-        for root, dirs, files in os.walk(library_root):
-          if root.split(os.path.sep)[-1:][0] == "bin":
-            pgsql_dir_bin = root
-          if root.split(os.path.sep)[-1:][0] == "lib":
-            pgsql_dir_lib = root
-        logging.debug("pgsql_dir_lib: {0}".format(pgsql_dir_lib))
-        if pgsql_dir_lib not in os.environ["LD_LIBRARY_PATH"]:
-          logging.debug("Adding {0} to LD_LIBRARY_PATH".format(pgsql_dir_lib))
-          os.environ["LD_LIBRARY_PATH"] = "{0}:{1}".format(os.environ["LD_LIBRARY_PATH"], pgsql_dir_lib)
-        if pgsql_dir_bin not in os.environ["PATH"]:
-          logging.debug("Adding {0} to PATH".format(pgsql_dir_bin))
-          os.environ["PATH"] = "{0}:{1}".format(os.environ['PATH'], pgsql_dir_bin)
-    else:
-        # sys.path.append(self.dbClientPath) # use this, from the config file to pg_dump & pg_restore.
-        os.environ["PATH"] = self.dbClientPath + os.pathsep + os.environ["PATH"]
-        # logging.debug(f"sysPath: {sys.path}")
-      
+  
   def create_credential(self):
     # print(f"create_credential: {self.db.getCredStr()}")
     """Creates a pg credential file to connect to the database."""
-    pgpFile = os.open(self.pgpass_file, os.O_CREAT | os.O_WRONLY, 0o600)
+    pgpFile = os.open(self.pgPassPath, os.O_CREAT | os.O_WRONLY, 0o600)
     os.write(pgpFile, str.encode(self.db.getCredStr()))
     os.close(pgpFile)
+    os.environ["PGPASSFILE"] = self.pgPassPath # need to redeclare in case we are using 2*PGClients.
   
   def delete_credential(self):
     """Deletes the pg credentials file."""
-    if os.path.exists(self.pgpass_file):
-      os.remove(self.pgpass_file)
+    if os.path.exists(self.pgPassPath):
+      os.remove(self.pgPassPath)
+    del os.environ["PGPASSFILE"]
   
   #@staticmethod
   def run_command(self, command_parts:list): # Sequence[str]
     _msgStr = ""
-    if self.db: self.create_credential() # NB: "--version" check does not require credentials.
-    
     try:
+      if self.db: # NB: "--version" check does not require credentials.
+        self.create_credential()
       _msgStr = FU.run_sub(command_parts)
     except Exception as ex:
       raise Exception(str(ex))
@@ -107,7 +61,7 @@ class PGClient():
     # NB: will not drop table if it has a dependant view, resulting in duplicate records.
     if plain:
       # NB: command_parts array failing on password for psql. Introduced subprocess caller instead
-      command = f"psql -h localhost -d vicmap -U vicmap -f {fileStr}"
+      command = f"{self.clientPath("psql")} -h localhost -d vicmap -U vicmap -f {fileStr}"
       os.environ["PGPASSWORD"] = "vicmap"
       _msgStr = FU.runSubprocess(command)
       del os.environ["PGPASSWORD"] # os.environ.pop("PGPASSWORD")
@@ -299,5 +253,3 @@ class DB():
     [_colDict.update({c[0]:c[1].replace('character varying','varchar')}) for c in data]
     return _colDict # return a dict of the column names and types
     # return [f"{c[0]}::{c[1].replace('character varying','varchar')}" for c in data] # return a list of the column names
-        
-    
