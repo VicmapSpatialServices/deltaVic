@@ -1,12 +1,16 @@
-from tkinter import ttk, Tk, Button, Checkbutton, Frame, Label, Entry, Text, StringVar, IntVar, END, Scrollbar, Canvas
+from tkinter import Tk, Button, Checkbutton, Frame, Label, Entry, StringVar, IntVar, END, Scrollbar, Canvas
+from tkinter import ttk
 # import tkinter as tk
 import logging, traceback
 from copy import deepcopy
+import webbrowser
 
 from .utils_db import DB, PGClient
 from .setup import QA
 from .sync import Synccer
 from .utils import Config
+
+from .utils_api import ApiUtils
 
 from .dbTable import LyrReg
 
@@ -18,9 +22,9 @@ class GUI(Tk):
     
     self.title("Vicmap Replication Service")
     self.configure(background="brown")
-    self.minsize(485, 630)  # width, height
+    self.minsize(630, 855)  # width, height
     # self.maxsize(495, 590)
-    self.geometry("300x300+500+500")  # width x height + x + y
+    self.geometry("300x300")  # width x height + x + y
 
     # https://www.google.com/search?q=tkinter+colours
     self.qaClrFail = 'orange'
@@ -29,12 +33,15 @@ class GUI(Tk):
     self.bgClrPass = 'skyblue'
     
     self.style = ttk.Style()
-    self.style.theme_create( "MyStyle", parent="alt", settings={
+    self.style.theme_create( "MyStyle", parent="default", settings={
       "TNotebook": {"configure": {"tabmargins": [2, 5, 2, 0] } },
       "TNotebook.Tab": {"configure": {"padding": [72, 10], "background":'skyblue', "font" : ('URW Gothic L', '11', 'bold')},},
       "bad.TNotebook.Tab": {"configure": {"padding": [72, 10], "background":'brown', "font" : ('URW Gothic L', '11', 'bold')},},
       "TFrame": {"configure": {"background":'skyblue'}},
-      "bad.TFrame": {"configure": {"background":'skyblue'}}
+      "bad.TFrame": {"configure": {"background":'skyblue'}},
+      "lyrInfo.TFrame": {"configure": {"background": "white"}},
+      "metaLink.TLabel": {"configure": {"background": "white", "font" : ('Sans','10','bold', 'underline')}},
+      "treeHeading.TLabel": {"configure": {"background": "white", "font" : ('Sans','9','bold')}}
     })
     self.style.theme_use("MyStyle")
 
@@ -44,6 +51,10 @@ class GUI(Tk):
     
     ##########
     tabs = ttk.Notebook(self)
+    tabs.grid(row=0, column=0, sticky='nsew')
+    self.columnconfigure(0,weight=1)
+    self.rowconfigure(0,weight=1)
+
     tSetup = ttk.Frame(tabs, style='bad.TFrame')
     tabs.add(tSetup, text='VRS Setup & QA')
     self.popSetupFrame(tSetup)
@@ -52,7 +63,8 @@ class GUI(Tk):
     tabs.add(tMeta, text='MetaData')
     self.popMetaFrame(tMeta)
 
-    tabs.grid(row=0, column=0)
+    # tabs.grid(row=0, column=0, sticky='nsew')
+
     # tabs.pack(sticky='nsew')
 
     # tSetup.config(style='Good')
@@ -72,9 +84,25 @@ class GUI(Tk):
   def _on_lyr_mousewheel(self, event):
    self.lyrCanvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
+  def configureLyrCanvasAndFrame(self, owner):
+    self.lyrCanvas = Canvas(owner, width=300, background='red')
+    self.lyrFrame = ttk.Frame(self.lyrCanvas, style='bad.TFrame')#, width=50)
+
+    self.lyrCanvas.bind('<Enter>', lambda e: self.lyrCanvas.bind_all("<MouseWheel>", self._on_lyr_mousewheel))
+    self.lyrCanvas.bind('<Leave>', lambda e: self.lyrCanvas.unbind_all("<MouseWheel>"))
+
+    self.lyrFrame.bind("<Configure>", lambda e: self.lyrCanvas.configure(scrollregion=self.lyrCanvas.bbox("all")))
+    self.lyrScrollbar = Scrollbar(owner, orient="vertical", command=self.lyrCanvas.yview)
+
+    owner.columnconfigure(1, weight=1)
+    owner.rowconfigure(1)#, weight=1)
+    self.lyrFrame.columnconfigure(0, weight=1)
+    self.lyrFrame.rowconfigure(0)#, weight=1)
+
   def popMetaFrame(self, owner):
     self.currentLyrs = []
     self.currentSchBtn = None
+    self.currentLyrBtn = None
     self.nrSchemas = 0
     self.nrSchHalf = 0
     rowNum, colNum = 0, 0
@@ -96,26 +124,12 @@ class GUI(Tk):
     # self.lyrFrame = Frame(owner, borderwidth=1, relief="flat", width=250, height=400)
     # self.lyrFrame.grid(row=1, rowspan=rowNum, column=1, sticky='nsew')
     
-    self.lyrCanvas = Canvas(owner, width=300)#, background='skyblue')
-    self.lyrFrame = ttk.Frame(self.lyrCanvas, style='bad.TFrame')#, width=50)
-    # self.lyrFrame.configure(background='skyblue')
-    self.lyrFrame.bind("<Configure>", lambda e: self.lyrCanvas.configure(scrollregion=self.lyrCanvas.bbox("all")))
-    self.lyrScrollbar = Scrollbar(owner, orient="vertical", command=self.lyrCanvas.yview)
-    # print(f"popMetaFr: {self.lyrCanvas.bbox}")
-    # print(f"popMetaFr: {self.lyrCanvas.yview}")
-
-    owner.columnconfigure(1, weight=1)
-    owner.rowconfigure(1)#, weight=1)
-    self.lyrFrame.columnconfigure(0, weight=1)
-    self.lyrFrame.rowconfigure(0)#, weight=1)
-
-    # lyrScrollbar=Scrollbar(self.lyrFrame, orient="vertical")
-    # lyrScrollbar.pack(side="right",fill="y")
-    self.lyrCanvas.bind_all("<MouseWheel>", self._on_lyr_mousewheel)
+    self.configureLyrCanvasAndFrame(owner)
 
     print(rowNum)
-    self.lyrInfo = Text(owner, border=1, background='white', padx=5, pady=5, width=50, height=18)
-    self.lyrInfo.grid(row=self.nrSchHalf+1, column=0, columnspan=4, padx=10, pady=10, sticky="nsew")
+    self.lyrInfoFrame = ttk.Frame(owner, border=5, style='lyrInfo.TFrame')
+    self.lyrInfoFrame.grid(row=self.nrSchHalf+1, column=0, columnspan=4, padx=10, pady=10, sticky="nsew")
+    owner.rowconfigure(self.nrSchHalf+1, weight=1)
 
   def mkSchBtn(self, owner, sch, row, col):
     # self.syncBtn = Button(fr, text='SYNC', font=(72), padx=30, relief="solid", background="salmon", command=self.guic.sync)
@@ -132,8 +146,22 @@ class GUI(Tk):
       self.currentSchBtn.config(background=self.qaClrFail)
     self.currentSchBtn = getattr(self, f"btn{sch}")
     self.currentSchBtn.config(background=self.qaClrPass)
+
+    self.currentLyrBtn = None
     for item in self.currentLyrs:
-      item.destroy()
+       item.destroy()
+
+    # print("CANVAS CHILDREN:")
+    print(self.lyrFrame.children)
+    # print(self.lyrCanvas.configure(height=10))
+
+    # TODO: Redo this, reset the height or something else instead.
+    # Re-instantiate layer frame to reset height
+    self.configureLyrCanvasAndFrame(owner)
+
+    # self.lyrScrollbar = Scrollbar(owner, orient="vertical", command=self.lyrCanvas.yview)
+    # self.lyrCanvas.bind_all("<MouseWheel>", self._on_lyr_mousewheel)   
+    
     
     print(f"showSch({owner}, {sch})")
     lyrs = DB(self.guic.config).getTables(sch)
@@ -144,20 +172,114 @@ class GUI(Tk):
     self.lyrCanvas.create_window((0, 0), window=self.lyrFrame, anchor="nw")
     self.lyrCanvas.grid(row=0, column=2, rowspan=self.nrSchHalf+1, sticky="nsew")
     for lyr in lyrs:
-      self.showLyr(self.lyrFrame, lyr, rowNum, 0)
+      self.showLyrBtn(self.lyrFrame, sch, lyr, rowNum, 0)
       rowNum += 1
+
+    #print(self.lyrFrame.children)
     
+    self.lyrScrollbar = Scrollbar(owner, orient="vertical", command=self.lyrCanvas.yview)
     self.lyrScrollbar.grid(row=0, column=3, rowspan=self.nrSchHalf+1, sticky="ns")
     self.lyrCanvas.configure(yscrollcommand=self.lyrScrollbar.set, background='skyblue')
     # print(f"showSch2: {self.lyrCanvas.bbox}")
     
-  def showLyr(self, fr, lyr, rowNum, col):
+  def showLyrBtn(self, fr, sch, lyr, rowNum, col):
     # print(f"showLyr({fr}, {lyr})")
-    setattr(self, f"lyr{lyr}", Label(fr, text=lyr, padx=10, background="white")) #, command=lambda:self.showLyr(owner, getattr(self, f"lyr{lyr}").get())
-    getattr(self, f"lyr{lyr}").grid(row=rowNum, column=col, sticky="W", padx=5, pady=1)
-    self.currentLyrs.append(getattr(self, f"lyr{lyr}"))
+    print(f"lyrBtn{lyr}")
+
+    # setattr(self, f"lyr{lyr}", Label(fr, text=lyr, padx=10, background="white")) #, command=lambda:self.showLyr(owner, getattr(self, f"lyr{lyr}").get())
+    # getattr(self, f"lyr{lyr}").grid(row=rowNum, column=col, sticky="W", padx=5, pady=1)
+    # self.currentLyrs.append(getattr(self, f"lyr{lyr}"))
+
+    setattr(self, f"lyrBtn{lyr}", Button(fr, text=lyr, padx=10, background="snow3", command=lambda:self.showLyrDetails(sch, lyr))) #, command=lambda:self.showLyr(owner, getattr(self, f"lyrBtn{lyr}").get())
+    #setattr(self, f"lyrBtn{lyr}", Button(None, textvariable="test", width=8, height=1, padx=1, relief="solid", background=self.qaClrFail))
+    getattr(self, f"lyrBtn{lyr}").grid(row=rowNum, column=col, sticky="W", padx=5, pady=1)
+    self.currentLyrs.append(getattr(self, f"lyrBtn{lyr}"))
   ###########################################################################
   ###########################################################################
+
+  def showLyrDetails(self, sch, lyr):
+    print(lyr)
+    # change the layer button colours
+    if self.currentLyrBtn:
+      self.currentLyrBtn.config(background="snow3")
+    self.currentLyrBtn = getattr(self, f"lyrBtn{lyr}")
+    self.currentLyrBtn.config(background="white")
+
+    # clear frame
+    for widget in self.lyrInfoFrame.winfo_children():
+      widget.destroy()
+
+    layerMeta = self.guic.getLyrMetadata(sch, lyr)
+
+    layerMetaLink = ttk.Label(self.lyrInfoFrame, text=f'ISO 19115 Metadata', cursor='hand2', style='metaLink.TLabel')
+    layerMetaLink.grid(row=0, column=0, columnspan=4, sticky='w')
+    layerMetaLink.bind("<Button-1>", lambda e: webbrowser.open_new(layerMeta['metadata']))
+
+
+    ## Table Columns
+    ttk.Label(self.lyrInfoFrame, text='Columns', style='treeHeading.TLabel').grid(row=1, column=0, columnspan=3, sticky='w')
+
+    layerColumnTree = ttk.Treeview(self.lyrInfoFrame, columns=('column', 'type'), show='headings')
+    layerColumnTree.heading('column', text='Column')
+    layerColumnTree.column('column', minwidth=0, width=150, stretch=True)
+    layerColumnTree.heading('type', text='Type')
+    layerColumnTree.column('type', minwidth=0, width=200, stretch=True)
+
+    for col in layerMeta['columns']:
+      layerColumnTree.insert('', END, value=(col, layerMeta['columns'][col]))
+
+    layerColumnTree.grid(row=2, column=0, columnspan=2, sticky='nsew')
+
+    layerColumnTreeScrollBar = Scrollbar(self.lyrInfoFrame, orient='vertical', command=layerColumnTree.yview)
+    layerColumnTree.configure(yscrollcommand=layerColumnTreeScrollBar.set)
+    layerColumnTreeScrollBar.grid(row=2, column=2, sticky='ns', padx=(0,3))
+
+
+    ## Table Indexes
+    layerIndexTreeLabel = ttk.Label(self.lyrInfoFrame, text='Indexes', style='treeHeading.TLabel')
+    layerIndexTreeLabel.grid(row=1, column=3, columnspan=3, sticky='w')
+
+    layerIndexTree = ttk.Treeview(self.lyrInfoFrame, columns=('column', 'type'), show='headings')
+    layerIndexTree.column('column', minwidth=0, width=125, stretch=True)
+    layerIndexTree.heading('column', text='Column')
+    layerIndexTree.heading('type', text='Type')
+    layerIndexTree.column('type', minwidth=0, width=75, stretch=True)
+
+    for index in layerMeta['indexes']:
+      layerIndexTree.insert('', END, value=(index[1], index[2]))
+
+    layerIndexTree.grid(row=2, column=3, columnspan=2, sticky='nsew')
+
+    layerIndexTreeScrollBar = Scrollbar(self.lyrInfoFrame, orient='vertical', command=layerIndexTree.yview)
+    layerIndexTree.configure(yscrollcommand=layerIndexTreeScrollBar.set)
+    layerIndexTreeScrollBar.grid(row=2, column=5, sticky='ns')
+
+
+    ## Dump History Tree
+    self.dumpHistoryTreeLabel = ttk.Label(self.lyrInfoFrame, text='Update History', style='treeHeading.TLabel')
+    self.dumpHistoryTreeLabel.grid(row=3, column=0, columnspan=3, sticky='w', pady=(5,0))
+
+    self.dumpHistoryTree = ttk.Treeview(self.lyrInfoFrame, columns=('dump_number', 'type', 'date'), show='headings')
+    self.dumpHistoryTree.column('dump_number', minwidth=0, width=125, stretch=True)
+    self.dumpHistoryTree.heading('dump_number', text='Update Number')
+    self.dumpHistoryTree.heading('type', text='Update Type')
+    self.dumpHistoryTree.column('type', minwidth=0, width=75, stretch=True)
+    self.dumpHistoryTree.heading('date', text='Date')
+    self.dumpHistoryTree.column('date', minwidth=0, width=150, stretch=True)
+
+    #pgdumps arrive in ascending order, sorting by descending update number
+    layerMeta['pgDumps'].sort(key = lambda x:x[2], reverse=True)
+
+    for dump in layerMeta['pgDumps']:
+      self.dumpHistoryTree.insert('', END, value=(dump[2], dump[1], dump[3]))
+
+    self.dumpHistoryTree.grid(row=4, column=0, columnspan=5, sticky='nsew')
+
+    self.dumpHistoryTreeScrollBar = Scrollbar(self.lyrInfoFrame, orient='vertical', command=self.dumpHistoryTree.yview)
+    self.dumpHistoryTree.configure(yscrollcommand=self.dumpHistoryTreeScrollBar.set)
+    self.dumpHistoryTreeScrollBar.grid(row=4, column=5, sticky='ns')
+
+
   
   def popSetupFrame(self, owner):
     # Label(tSetup, text='Vicmap Replication Service', font=(32)).grid(row=0, column=0, columnspan=2, padx=5, pady=5)
@@ -179,6 +301,7 @@ class GUI(Tk):
     # self.cntrlFrmBg = StringVar(value=self.qaClrFail)
     self.cntrlFrame = Frame(owner, borderwidth=5, relief="raised")#, width=150, height=100)#, width=300, height=300)
     self.cntrlFrame.grid(row=2, column=0, columnspan=2, padx=5, pady=5, sticky='nsew')
+    owner.columnconfigure(1, weight=1)
     self.cntrlFrm(self.cntrlFrame)#self.cntrlFrmBg)
     ##
     self.dbFrmBg = StringVar(value=self.qaClrFail)
@@ -210,8 +333,6 @@ class GUI(Tk):
     self.syncBtn = Button(fr, text='SYNC', font=(72), padx=30, relief="solid", background="OliveDrab3", command=self.guic.sync)
     self.syncBtn.grid(row=2, column=3)#, padx=5, pady=5)#.pack(side='top', fill='none', padx=5, pady=(15,0))
     # Button(tSetup, text='SYNC', font=(288), command=self.sync).grid(row=1, column=0)
-    self.openCloseBtn = Button(fr, text="Close", font=(288), command=self.dbOpenClose)
-    self.openCloseBtn.grid(row=0, column=6, sticky='E', padx=5, pady=5)
     
     qaFr = Frame(fr, borderwidth=1, relief="solid")
     Label(qaFr, text='QA', font=(32)).grid(row=0, column=0, columnspan=2, pady=2)
@@ -259,7 +380,7 @@ class GUI(Tk):
     self.lblCltHdr = Label(frm, text=title, background=bgClr.get())
     self.lblCltHdr.grid(row=0, column=0, columnspan=3, sticky='W', pady=(0,5))
     Button(frm, text='Test Restore', command=self.guic.testPgc).grid(row=0, column=1, sticky="E", pady=(0,5))
-    self.lblEnt(frm, bgClr, 'binPath', 'Bin Path', 'C:\Program Files\PostgreSQL\\17\\bin', 60, 1, 0)
+    self.lblEnt(frm, bgClr, 'binPath', 'Bin Path', 'C:\\Program Files\\PostgreSQL\\17\\bin', 60, 1, 0)
     return (frm, self.lblCltHdr, self.lblbinPath)
   
   def mkRegFrm(self, frm, bgClr):
@@ -359,20 +480,6 @@ class GUI(Tk):
     self.syncBtn.config(background='OliveDrab3')
     
   ###########################################################################
-
-  def dbOpenClose(self):#, event):
-    print(self.qaDb.get())
-    self.openCloseBtn.configure(text='Open' if not self.qaDb.get() else 'Close')
-    self.qaDb.set(1) if not self.qaDb.get() else self.qaDb.set(0)
-    # self.regFrmBg.set('OliveDrab3')
-    # self.dbFrm.config(background='OliveDrab3')
-    self.style.configure('TFrame', background='brown')
-
-    self.guic.updateDBCounts()
-    
-    self.update_idletasks()
-    # print(self.regFrmBg.get())
-    #self.destroy()
   
 class GuiControl():
   def __init__(self, gui, stg):
@@ -495,6 +602,14 @@ class GuiControl():
       self.gui.dsetCnt.config(text="   ")
       self.gui.activeCnt.config(text="   ")
       self.gui.errCnt.config(text="   ")
+
+  def getLyrMetadata(self, sch, lyr):
+    api = ApiUtils(self.config.get('baseUrl'), self.config.get('api_key'), self.config.get('client_id'))
+    return api.post("data",
+      {
+        "dset": f"{sch}.{lyr}"
+       }
+    )
 
 if __name__ == "__main__":
   gui = GUI(None, None)
