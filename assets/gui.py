@@ -1,4 +1,4 @@
-from tkinter import *
+from tkinter import Tk, Button, Checkbutton, Frame, Label, Entry, StringVar, IntVar, END, Scrollbar, Canvas
 from tkinter import ttk
 # import tkinter as tk
 import logging, traceback
