@@ -15,7 +15,10 @@ Clone this repository locally to the machine you wish to use.
 I recommend using an IDE such as [VS Code](https://code.visualstudio.com/download) to view and make edits to the python workspace. (Pycharm, Idle or a text editor are of course viable options, among many others.)
 
 eg: in a command window, move to the folder you wish to put the VLRS client in and type
+```bash
 git clone https://github.com/VicmapSpatialServices/deltaVic.git VLRS
+```
+
 
 ## prereq 2. Python 3.10 (or above)
 
