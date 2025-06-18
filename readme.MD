@@ -1,4 +1,4 @@
-# Vicmap Loan & Replication Service (VLRS)
+# Vicmap Load & Replication Service (VLRS)
 
 This project allows download and sync of the vicmap suite of data products to a local PostGis database.
 
