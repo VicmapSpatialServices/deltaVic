@@ -25,7 +25,7 @@ class Synccer():
     self.resolve() # updates out of date datasets to 'QUEUED'
     _layers = [ll for ll in self.db.getRecSet(LyrReg) if ll.active and not ll.err and ll.status not in self.haltStates]
     self.tables = [ll for ll in _layers if ll.relation=='table']
-    # self.tables = [tt for tt in self.tables if tt.identity.startswith('vmtrans.tr_road')]#[0:1] # use to dither candidates.
+    # self.tables = [tt for tt in self.tables if tt.identity.startswith('vmtrans.tr_road')]#[0:1] # use to dither candidates if testing.
     # self.tables.sort(key=lambda ll:ll.extradata.get('row_count') if 'row_count' in ll.extradata else 0, reverse=True)
     self.views = [ll for ll in _layers if ll.relation=='view']
     
@@ -38,7 +38,7 @@ class Synccer():
 
     _local, _errs, _remote = {}, {}, {}
 
-    [_local.update({d.identity:d}) for d in _all_local if  not d.err]
+    [_local.update({d.identity:d}) for d in _all_local if not d.err]
     [_errs.update({d.identity:d}) for d in _all_local if d.err]
     [_remote.update({ll.identity:ll}) for ll in self.getVicmap()]
     logging.info(f"Layer state: {len(_all_local)} in vm_meta.data, {len([i for i in _local if _local[i].active])} active, {len(_errs)} errors. {len(_remote)} available from vicmap_master")
@@ -50,6 +50,7 @@ class Synccer():
       # if name not in list(_local.keys()).extend(list(_errs.keys())):
         dset.sup_ver=-1 # new record gets a negative supply-id so it matches the latest seed.
         dset.sup_type=Supplies.FULL # seed is full.
+        if self.cfg.get('sync_all') == "True": dset.active=True
         self.db.execute(*dset.insSql())
 
     # scroll through the local datasets and set to queued if versions don't match
@@ -61,7 +62,7 @@ class Synccer():
       # Note conditions: only compare those datasets present locally as active, in a complete state and not in err.
       if lyr.active and lyr.status == LyrReg.COMPLETE:
         if lyr.sup_ver != _vmLyr.sup_ver:
-          # logging.debug(f"{lyr.sup_ver}, {_vmLyr.sup_ver}")
+          # logging.info(f"version mismatch: {lyr.sup_ver}, {_vmLyr.sup_ver}")
           self.db.execute(*lyr.upStatusSql(LyrReg.QUEUED))
 
   def getVicmap(self):#seedDsets(self):
@@ -92,8 +93,48 @@ class Synccer():
   def dump(self, lyrQual):
     fPath = f"temp/{lyrQual}.dmp"
     PGClient(self.db, self.config.get('dbClientPath')).dump_file(lyrQual, fPath)
+    return fPath
 
+  def upload(self, srcQual, supType, relation='table', md_uuid=None, geomType=None): # 3 optional parameters for initial uploads (creates). (Not strictly necessary).
+    # eg sync.upload('vmadd.address', Supplies.INC)
+    logging.info(f"uploading {srcQual} to VLRS")
+    # return # for safety during testing
+
+    try:
+      sch, tbl = srcQual.split('.')
+      tgtQual = f'miscsupply.{tbl}'
+      # # export the file
+      fPath = f"temp/{srcQual}.dmp"
+      
+      # copy layer to miscsupply schema then dump it. Should include indexes.
+      self.db.copyTable(srcQual, tgtQual)
+      # dump from miscsupply schema.
+      logging.debug(f"{tgtQual}, {fPath}")
+      PGClient(self.db, self.config.get('dbClientPath')).dump_file(tgtQual, fPath)
+      
+      #register the upload on VLRS and get an s3promise-link
+      data = {"dset":srcQual,"fname":fPath,"sup_type":supType, "relation":relation}
+      if md_uuid: data.update({"md_uuid":md_uuid})
+      if geomType: data.update({"geomType":geomType})
+
+      api = ApiUtils(self.config.get('baseUrl'), self.config.get('api_key'), self.config.get('client_id'))
+      result = api.post('upload', data)
+      if s3promiseLink := result.get('uploadPromise'):
+        api.put(s3promiseLink, fPath)
+      else:
+        raise Exception(f"S3 put_object failed")
+      
+      # remove the migration artifacts
+      self.db.dropTable(tgtQual)
+      FU.remove(fPath) # clean up the dumpfile
+      
+      return True # f"Successfully uploaded {fPath}"
     
+    except Exception as ex:
+      errStr = f"Failed to upload {fPath}: {str(ex)}"
+      logging.error(errStr)
+      return False # 
+
 ###########################################################################
                      ### y   y N    N CCCCC
                      #   y   y NN   N C
@@ -103,6 +144,8 @@ class Synccer():
 ###########################################################################
 
 class Sync():
+  DATAPATH = 'temp'
+
   def __init__(self, db, config, lyr, haltStates, tracker):
     self.db = db
     self.config = config
@@ -112,18 +155,21 @@ class Sync():
 
   def process(self):
     while self.lyr.status not in self.halt and not self.lyr.err:
+      startTime = datetime.now() 
+      _status = self.lyr.status.lower() # store this here before it is up-set by the process.
+      
       try:
-        startTime = datetime.now() 
-        _status = self.lyr.status.lower() # store this here before it is updated by the process.
-        
         getattr(self, _status)()
-        
-        self.upTrack(_status, (datetime.now()-startTime).total_seconds(), self.lyr)
       except Exception as ex:
         logging.error(str(ex))
         logging.debug(traceback.format_exc())
         self.db.execute(*self.lyr.upExtraSql({"error":str(ex)}))
-        self.db.execute(*self.lyr.setErr())
+        self.db.execute(*self.lyr.setErr()) # treats reconcile differently.
+      
+      self.upTrack(_status, (datetime.now()-startTime).total_seconds(), self.lyr)
+      
+  def quiescent(self): # if attempting a sync here, this lyr must now be now active
+    self.db.execute(*self.lyr.upStatusSql(LyrReg.QUEUED))
 
   def queued(self):
     logging.debug(F"q-ing {self.lyr.identity} -- current({self.lyr.sup}:{self.lyr.sup_ver}:{self.lyr.sup_type})")
@@ -134,10 +180,10 @@ class Sync():
     _rsp = api.post("data", {"dset":self.lyr.identity,"sup_ver":self.lyr.sup_ver})
     if not (_next := _rsp.get("next")):
       if self.lyr.sup_ver == _rsp.get("sup_ver"): # have the latest already
-        logging.warn("Requested data load but endpoint says max(sup_ver) is current")
+        logging.warning("Requested data load but endpoint says max(sup_ver) is current")
         self.db.execute(*self.lyr.upStatusSql(LyrReg.COMPLETE))
       else:
-        logging.warn("Requested data load but endpoint says next ready only half ready yet")
+        logging.warning("Requested data load but endpoint says next ready only half ready yet")
         self.db.execute(*self.lyr.upStatusSql(LyrReg.WAIT))
       return
     
@@ -150,8 +196,8 @@ class Sync():
 
   def download(self):
     logging.debug(F" -> download-ing {self.lyr.identity}")
-    if not os.path.exists("temp"): os.makedirs("temp")
-    fPath = f"temp/{self.lyr.extradata['filename']}"
+    if not os.path.exists(self.DATAPATH): os.makedirs(self.DATAPATH)
+    fPath = f"{self.DATAPATH}/{self.lyr.extradata['filename']}"
     ApiUtils.download_file(self.lyr.extradata['s3_url'], fPath)
     
     self.db.execute(*self.lyr.delExtraKey('s3_url')) # remove s3_url from extradata as we are done with it now.
@@ -160,7 +206,12 @@ class Sync():
   def restore(self):
     # restore the file - full loads go straight to each vicmap schema, incs go to the vm_delta schema.
     # logging.debug(f"restore version: {PGClient(self.db, self.config.get('dbClientPath')).get_restore_version()}") # test pg connection.
-    fPath = f"temp/{self.lyr.extradata['filename']}"
+    
+    #ensure target schema exists
+    if self.lyr.sch not in self.db.getSchemas():
+      self.db.createSch(self.lyr.sch)
+
+    fPath = f"{self.DATAPATH}/{self.lyr.extradata['filename']}"
     PGClient(self.db, self.config.get('dbClientPath')).restore_file(fPath)
     
     if self.lyr.sup_type == Supplies.FULL:
@@ -207,6 +258,7 @@ class Sync():
     recStr += f" count(remote:{supCount}!=local:{tblCount})-diff({supCount-tblCount})" if tblCount!=supCount else ""
     recStr += f" chkSum(remote:{supChkSum}!=local:{tblChkSum})-diff({supChkSum-tblChkSum})" if tblChkSum!=supChkSum else ""
     if recStr:
+      # if the reconcile has failed, (chaff from an upload?) queue the full supply instead. No, leads to loopy behaviour.
       raise Exception(f"Supply misreconciled: {recStr}")
     # self.db.execute(*self.lyr.upStatsSql(maxUfiDate, maxUfi, tblCount, tblChkSum))
     
@@ -218,7 +270,7 @@ class Sync():
     logging.debug(F" -> clean-ing {self.lyr.identity}")
     if self.lyr.sup_type == Supplies.INC:
       self.db.dropTable(self.lyr.extradata['filename'].replace('.dmp',''))
-    FU.remove(f"temp/{self.lyr.extradata['filename']}")
+    FU.remove(f"{self.DATAPATH}/{self.lyr.extradata['filename']}")
     # status->COMPLETE or err=true
     self.db.execute(*self.lyr.upStatusSql(LyrReg.COMPLETE))
 
@@ -234,4 +286,3 @@ class Sync():
     _tms = lyr.extradata[tms] if tms in lyr.extradata else {}
     _tms.update({status:duration}) # overwrite
     self.db.execute(*lyr.upExtraSql({tms:_tms}))
-    

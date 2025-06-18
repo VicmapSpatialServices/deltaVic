@@ -1,7 +1,12 @@
 import json, logging
 from datetime import datetime
 
+# from .utils import Supplies
+from .utils_api import ApiUtils
+from .utils_db import DB
+
 class DBTable():
+  QUIESCENT="QUIESCENT"
   QUEUED="QUEUED"
   DOWNLOAD="DOWNLOAD"
   RESTORE="RESTORE"
@@ -15,6 +20,8 @@ class DBTable():
 
   def __init__(self, row):
     [setattr(self, col,val) for col,val in zip(self.cols, row)]
+    if hasattr(self, 'extradata'):
+      self.extradata = self.extradata or {}
   
   def insSql(self):
     _upDict = {}
@@ -27,11 +34,23 @@ class DBTable():
     return sqlStr, sqlParams
 
   def setErr(self, errState=True):
+    # if self.status == self.RECONCILE: # queue the full supply as we have a misrec. -> can get stuck in a loop when the misrec is due to bad metadata.
+    #   self.sup_ver = -1
+    #   self.status = self.QUEUED
+    #   return self.upSupSql(self.sup_ver, Supplies.FULL, self.sup_date)
+    
+    # default behaviour is to log the error.
     self.err = errState
-    sqlStr = "update {} set err=%s where identity=%s".format(self.name)
+    sqlStr = f"update {self.name} set err=%s where identity=%s"
     sqlParams = (self.err, self.identity)
     return sqlStr, sqlParams
   
+  def setActive(self, active):
+    self.active = active
+    sqlStr = f"update {self.name} set active=%s where identity=%s"
+    sqlParams = (self.active, self.identity)
+    return sqlStr, sqlParams
+
   def asList(self):
     # return [getattr(self, col) for col in self.cols]
     listy = [getattr(self, col) for col in self.cols]
@@ -98,20 +117,85 @@ class LyrReg(DBTable):
       super().__init__(lyrObj)
     elif type(lyrObj) == dict:
       sup_date = datetime.fromisoformat(lyrObj['sup_date']) if lyrObj['sup_date'] else None
-      newRow = [lyrObj['identity'],True,lyrObj['relation'],lyrObj['geom_type'],lyrObj['pkey'],LyrReg.QUEUED,False,lyrObj['sup'],lyrObj['sup_ver'],sup_date,None,None,None,None]
+      newRow = [lyrObj['identity'],False,lyrObj['relation'],lyrObj['geom_type'],lyrObj['pkey'],self.QUIESCENT,False,lyrObj['sup'],lyrObj['sup_ver'],sup_date,None,None,None,None]
       # logging.debug(f"initting new row: {newRow}")
       super().__init__(newRow)
       # logging.debug(self.sup_ver)
     else:
       raise Exception(f"Layer Object was not in an expected format")
+    
+    self.sch, self.tbl = self.identity.split('.')
   
   def __str__(self):
     return f"{self.identity}-{self.sup}-{self.sup_ver}-{self.status}"
 
-# class Datasets():
-#   def __init__(self, db):
-#     _dsets = db.getRecSet(LyrReg.listmaker())
-#   def __str__(self):
-#     return f"{self.sch}.{self.tbl} {self.status}"
+  def merge(self, dbDsets):
+    if others := [d for d in dbDsets if d.identity==self.identity]:
+      [setattr(self, col, getattr(others[0], col)) for col in self.cols]
 
+class Schemas():#list
+  def __init__(self, type, cfg):
+    # super().__init__(self)
+    # print(f"Schema({type})")
+    self.schs = []
+    self.type = type
+    self.cfg = cfg
 
+    self.populate()
+    
+  def populate(self):
+    match self.type:
+      case 'Meta':
+        if not self.cfg.get("regComplete") == "True": return
+
+        api = ApiUtils(self.cfg.get('baseUrl'), self.cfg.get('api_key'), self.cfg.get('client_id'))
+        rsp = api.post("data", {})
+        _dsets = [LyrReg(d) for d in rsp['datasets']]
+
+        # Merge in the existing table data for display and manipulation of active and status
+        if self.cfg.get("dbComplete") == "True": 
+          _db = DB(self.cfg)
+          _dbDsets = [d for d in _db.getRecSet(LyrReg)]
+          [d.merge(_dbDsets) for d in _dsets]
+
+        _schs = list(set([lyr.sch for lyr in _dsets]))
+        _schs.sort(key=lambda s:s)
+        for sch in _schs:
+          _lyrs = [d for d in _dsets if d.sch==sch]
+          _newSch = Schema(sch)
+          [_newSch.add(d) for d in _lyrs]
+          self.schs.append(_newSch)
+      case 'Data':
+        if not self.cfg.get("dbComplete") == "True": return
+
+        _db = DB(self.cfg)
+        _dbDsets = [d for d in _db.getRecSet(LyrReg)]
+        _schs = _db.getSchemas()
+        for sch in _schs:
+          _newSch = Schema(sch)
+          # combine the below with the available vm_meta.data info
+          _dsets = [LyrReg((f"{sch}.{tbl}",None,None,None,None,None,None,None,None,None,None,None,None,None)) for tbl in _db.getTables(sch)]
+          [d.merge(_dbDsets) for d in _dsets] # merge in the existing metadata from the local tracking table
+          [_newSch.add(d) for d in _dsets]
+          self.schs.append(_newSch)
+      case '_':
+        logging.warning(f"Metadata type {self.type} not known") 
+    
+  def get(self, sch):
+    if schs := [s for s in self.schs if s.name==sch]:
+      return schs[0]
+    else:
+      print("Nope")
+      # newSch = Schema(sch)
+      # self.append(newSch)
+      # return newSch
+
+class Schema():#list
+  def __init__(self, sch):
+    # super().__init__(self)
+    self.name = sch
+    self.lyrs = []
+    # print(f"*** {sch} ***")
+  def add(self, lyr):
+    # print(lyr)
+    self.lyrs.append(lyr)

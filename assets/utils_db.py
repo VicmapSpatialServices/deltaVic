@@ -12,78 +12,42 @@ from .utils import Config, FileUtils as FU
 #     self.pswd = pswd
 
 class PGClient():
-  def __init__(self, db, dbClientPath):
+  def __init__(self, db, dbClientPath, dPath='temp'): # pass in config?
     self.db = db
     self.dbClientPath = dbClientPath
 
     """Database connections manages using PGPASSFILE as outlined in https://www.postgresql.org/docs/9.3/libpq-pgpass.html"""
-    pgpassFileName = ".vicmap_load_{0}.pgpgpass".format(str(time.time()).replace(".", ""))
-    self.pgpass_file = os.path.join(Path.home(), pgpassFileName)
-    if not os.path.exists(Path.home()):
-      if platform.system().lower() == "linux":
-        self.pgpass_file = os.path.join("/tmp", pgpassFileName)
-      else:
-        self.pgpass_file = os.path.join("D:\\temp", pgpassFileName)
-
-    os.environ["PGPASSFILE"] = self.pgpass_file
-
-    self.checkEnv()
-
-  def checkEnv(self):
-      
-    if "LIB_PATH" in os.environ.keys():
-      logging.debug("Library data path: {0}".format(os.environ["LIB_PATH"]))
-
-    #Check enviroment variables set for pgsql
-    PGSQL_APPLICATION_NAME = "pgsql"
-    pgsql_search_key = "/{0}".format(PGSQL_APPLICATION_NAME)
-    plfm = platform.system().lower()
-    logging.debug(f"platform: {plfm}")
-
-    # NB: This block is a mess due to earlier exhaustive testing reuired on aws al2 machines
-    if platform.system().lower() == "linux" and "LIB_PATH" in os.environ.keys():
-      library_root = os.environ["LIB_PATH"]
-      logging.debug(f"pgsql_search_key: {pgsql_search_key}")
-      logging.debug("LD_LIBRARY_PATH: " + os.environ["LD_LIBRARY_PATH"])
-      logging.debug("PATH: " + os.environ["PATH"])
-      if pgsql_search_key not in os.environ["LD_LIBRARY_PATH"] or pgsql_search_key not in os.environ["PATH"] :
-        pgsql_dir_bin = None
-        pgsql_dir_lib = None
-        logging.debug("Searching {0} to find pgsql ...".format(library_root))
-        for root, dirs, files in os.walk(library_root):
-          if root.split(os.path.sep)[-1:][0] == "bin":
-            pgsql_dir_bin = root
-          if root.split(os.path.sep)[-1:][0] == "lib":
-            pgsql_dir_lib = root
-        logging.debug("pgsql_dir_lib: {0}".format(pgsql_dir_lib))
-        if pgsql_dir_lib not in os.environ["LD_LIBRARY_PATH"]:
-          logging.debug("Adding {0} to LD_LIBRARY_PATH".format(pgsql_dir_lib))
-          os.environ["LD_LIBRARY_PATH"] = "{0}:{1}".format(os.environ["LD_LIBRARY_PATH"], pgsql_dir_lib)
-        if pgsql_dir_bin not in os.environ["PATH"]:
-          logging.debug("Adding {0} to PATH".format(pgsql_dir_bin))
-          os.environ["PATH"] = "{0}:{1}".format(os.environ['PATH'], pgsql_dir_bin)
-    else:
-        # sys.path.append(self.dbClientPath) # use this, from the config file to pg_dump & pg_restore.
-        os.environ["PATH"] += os.pathsep + self.dbClientPath
-        # logging.debug(f"sysPath: {sys.path}")
-      
+    _strTime = str(time.time()).replace('.','')
+    pgpassFileName = f".{db.dbname}_{_strTime}.pgpgpass"
+    self.pgPassPath = os.path.join(dPath, pgpassFileName)
+    
+  def clientPath(self, client):
+    path = os.path.join(self.dbClientPath, client)
+    if platform.system().lower() == 'windows':
+      path += '.exe'
+    return path
+  
+  
   def create_credential(self):
+    # print(f"create_credential: {self.db.getCredStr()}")
     """Creates a pg credential file to connect to the database."""
-    pgpFile = os.open(self.pgpass_file, os.O_CREAT | os.O_WRONLY, 0o600)
+    pgpFile = os.open(self.pgPassPath, os.O_CREAT | os.O_WRONLY, 0o600)
     os.write(pgpFile, str.encode(self.db.getCredStr()))
     os.close(pgpFile)
+    os.environ["PGPASSFILE"] = self.pgPassPath # need to redeclare in case we are using 2*PGClients.
   
   def delete_credential(self):
     """Deletes the pg credentials file."""
-    if os.path.exists(self.pgpass_file):
-      os.remove(self.pgpass_file)
+    if os.path.exists(self.pgPassPath):
+      os.remove(self.pgPassPath)
+    del os.environ["PGPASSFILE"]
   
   #@staticmethod
   def run_command(self, command_parts:list): # Sequence[str]
     _msgStr = ""
-    if self.db: self.create_credential() # NB: "--version" check does not require credentials.
-    
     try:
+      if self.db: # NB: "--version" check does not require credentials.
+        self.create_credential()
       _msgStr = FU.run_sub(command_parts)
     except Exception as ex:
       raise Exception(str(ex))
@@ -92,44 +56,53 @@ class PGClient():
     
     return _msgStr
 
-  def restore_file(self, file: str): # used in λ.VML_restore.restore()
+  def restore_file(self, fileStr:str, plain=False): # used in λ.VML_restore.restore()
     """imports a table from a pgdump file"""
     """pg_restore --host=localhost --port=5432 --dbname=vicmap --username=vicmap --clean --if-exists --no-owner --no-privileges --no-acl --no-security-labels --no-tablespaces  vmreftab.hy_substance_extracted"""
     # NB: will not drop table if it has a dependant view, resulting in duplicate records.
-    command_parts = ["pg_restore"]
-    command_parts.extend(self.db.getConnArgs())
-    command_parts.extend(["--clean", "--if-exists", "--no-owner", "--no-privileges", "--no-acl", "--no-security-labels", "--no-tablespaces"])
-    command_parts.append(file)
+    if plain:
+      # NB: command_parts array failing on password for psql. Introduced subprocess caller instead
+      command = f"{self.clientPath('psql')} -h localhost -d vicmap -U vicmap -f {fileStr}"
+      os.environ["PGPASSWORD"] = "vicmap"
+      _msgStr = FU.runSubprocess(command)
+      del os.environ["PGPASSWORD"] # os.environ.pop("PGPASSWORD")
+      return _msgStr
+    else:
+      command_parts = [self.clientPath("pg_restore")]
+      command_parts.extend(self.db.getConnArgs())
+      command_parts.extend(["--clean", "--if-exists", "--no-owner", "--no-privileges", "--no-acl", "--no-security-labels", "--no-tablespaces"])
+      command_parts.append(fileStr)
     return self.run_command(command_parts)
       
   def get_restore_version(self): #used in VML_setup.vicmap_deploy
     """Get version of pg restore operation."""
-    return self.run_command(["pg_restore","--version"])
+    return self.run_command([self.clientPath("pg_restore"),"--version"])
   # def get_dump_version(self): # not currently used.
   #     """Get version of pg dump operation."""
-  #     return self.run_command(["pg_dump","--version"])
+  #     return self.run_command([self.clientPath("pg_dump"),"--version"])
 
-  def dump_file(self, table: str, file: str):
-    command_parts = ["pg_dump"]
+  def dump_file(self, table:str, file:str, args:list=None):
+    command_parts = [self.clientPath("pg_dump")]
     command_parts.extend(self.db.getConnArgs())
     command_parts.extend(["--format=c", f"--table={table}", f"--file={file}"])
+    if args: command_parts.extend(args)
     return self.run_command(command_parts)
   
   def dump_ddl(self, table: str, file: str):
-    command_parts = ["pg_dump"]
+    command_parts = [self.clientPath("pg_dump")]
     command_parts.extend(self.db.getConnArgs())
     command_parts.extend(["--schema-only", f"--table={table}", f"--file={file}"])
     return self.run_command(command_parts)
-    
+  
 class DB():
   def __init__(self, config):#host, port, dbname, uname, pswd):
-    if type(config) == list:
+    if type(config) == list: #if isinstance(config, list):
       self.host = config[0]
       self.port = config[1]
       self.dbname = config[2]
       self.uname = config[3]
       self.pswd = config[4]
-    elif type(config) == Config:
+    elif type(config) == Config: #if isinstance(config, Config):
       self.host = config.get('dbHost')
       self.port = config.get('dbPort')
       self.dbname = config.get('dbName')
@@ -137,11 +110,17 @@ class DB():
       self.pswd = config.get('dbPswd')
     else:
       raise Exception(f"Wrong object ({type(config)}) passed to DB.init")
-  # def __init__(self, detail:object):
-  #   if isinstance(detail, DBConn):
-  #     self.dbConn = detail
-  #   elif isinstance(detail, dict):
-  #     self.dbConn = DBConn(detail)
+    
+    self.cnxn, self.curs = self.connect()
+
+  def connect(self):
+    _cnxn = psycopg2.connect(host=self.host, port=self.port, dbname=self.dbname, user=self.uname, password=self.pswd)
+    _cnxn.set_session(autocommit=True)
+    return _cnxn, _cnxn.cursor()
+  
+  def close(self):
+    self.curs.close()
+    self.cnxn.close()
 
   def getConnArgs(self):
     #returns a list of args for use in the pg client.
@@ -155,41 +134,20 @@ class DB():
   def getCredStr(self):
     return ":".join([self.host, str(self.port), self.dbname, self.uname, self.pswd])
 
-  def connect(self):
-    return psycopg2.connect(host=self.host, port=self.port, dbname=self.dbname, user=self.uname, password=self.pswd)
-    
   def execute(self, sqlStr, params=None):
-    # psycopg2 will pass back a tuple of tuples: ((,,,),(,,,), ..)
+    # psycopg2 will pass back a tuple of tuples as a result: ((,,,),(,,,), ..)
     logging.debug(f"SQL: {sqlStr} Parameters: {params}")
+    self.curs.execute(sqlStr, params) if params else self.curs.execute(sqlStr)
+    # field_name_list = [desc.name for desc in curs.description]
+    # if msg := curs.statusmessage: logging.info(msg)
     data = []
-
-    cnxn = self.connect()
-    cnxn.set_session(autocommit=True)
-    curs = cnxn.cursor()
-
-    try:
-      curs.execute(sqlStr, params) if params else curs.execute(sqlStr)
-    except Exception as e:
-      if curs: curs.close()
-      if cnxn: cnxn.close()
-      raise e
-  
-    if curs.description == None:
-      #Use this if autocommit has not been set using connection.set_session(autocommit=True)
-      #connection.commit()
+    if self.curs.description == None: # test if notihng is returned, ie: when running an update
       pass
     else:
-      data = curs.fetchall()
-    # field_name_list = [desc.name for desc in curs.description]
-
-    # if msg := curs.statusmessage:
-    #   logging.info(msg)
-    
-    curs.close()
-    cnxn.close()
-
+      data = self.curs.fetchall()
     return data
-
+  
+  # rows(), row() & item() will wrap execute() and shape the returned tuples
   def rows(self, sqlStr, params=None):
     result = self.execute(sqlStr, params)
     return result or []
@@ -216,7 +174,7 @@ class DB():
   
   def getTables(self, schema:str):
     """ get all table names from a schema """
-    sqlStr = f"SELECT table_name FROM information_schema.tables WHERE table_schema = '{schema}'"
+    sqlStr = f"SELECT table_name FROM information_schema.tables WHERE table_schema = '{schema}' order by table_name"
     data = self.rows(sqlStr)
     return [t[0] for t in data] if data else []# return a list of the table names
 
@@ -262,7 +220,11 @@ class DB():
     except Exception as ex:
         return str(ex)
     return ""
-    
+  
+  def copyTable(self, srcTblQual, tgtTblQual):
+    if self.table_exists(tgtTblQual): self.dropTable(tgtTblQual)
+    self.execute(f"CREATE TABLE {tgtTblQual} as select * from {srcTblQual}")
+
   def dropTable(self, tblQual:str):
     logging.debug(f"Dropping table {tblQual}")
     self.execute(f"DROP TABLE IF EXISTS {tblQual} CASCADE") # don't require return values
@@ -292,5 +254,3 @@ class DB():
     [_colDict.update({c[0]:c[1].replace('character varying','varchar')}) for c in data]
     return _colDict # return a dict of the column names and types
     # return [f"{c[0]}::{c[1].replace('character varying','varchar')}" for c in data] # return a list of the column names
-        
-    
