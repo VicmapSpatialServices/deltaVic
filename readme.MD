@@ -194,5 +194,8 @@ docker build -t deltavic .
 The deltaVic commands can then be run like so:
 
 ```console
-docker run deltavic sync
+docker run -v ${PWD}/config.ini:/deltaVic/config.ini --network=host deltavic sync
 ```
+
+- The `-v ${PWD}/config.ini:/deltaVic/config.ini` option mounts the local `config.ini` into the container. You may need to replace `${PWD}` with the absolute path to the config file.
+- The `--network=host` option allows the container to access the host's network, use this if the PostGIS server is running locally.
