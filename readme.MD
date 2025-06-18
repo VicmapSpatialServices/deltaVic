@@ -5,7 +5,7 @@ This project allows download and sync of the vicmap suite of data products to a 
 Author: Warwick Wilson
 Company: Department of Transport and Planning (Victoria)
 Date: 13/11/23
-Revised: 12/6/25
+Revised: 18/6/25
 
 # Prerequisites
 
@@ -18,12 +18,12 @@ eg: in a command window, move to the folder you wish to put the VLRS client in a
 ```bash
 git clone https://github.com/VicmapSpatialServices/deltaVic.git VLRS
 ```
-
+deltaVic can be downloaded from github without git, (by downloading a zip file from the **Code** button, but using git means you can update the application as improvements occur.).
 
 ## prereq 2. Python 3.10 (or above)
 
-[Install python](https://www.python.org/downloads/) version 3.10 or better, (3.12 recommended)
-> ensure you include "tk" when installng if you wish to use the GUI as has been built in tkinter.
+[Install python](https://www.python.org/downloads/) version 3.10 or better, (3.13 recommended)
+> ensure you include "tk" when installing if you wish to use the GUI (it has been built in **tk**inter.).
 
 Use python's pip to install the required **requests** (for API calls) and **psycopg2** (for database calls) libraries. Some variations on pip install you may encounter are displayed below:
 
@@ -41,13 +41,15 @@ Exceuting the deltavic.py script will may look like the following depending on h
 ```bash
 deltaVic
 deltaVic.py
-python3.12 deltaVic.py
+py deltaVic.py
+python deltaVic.py
+python3.13 deltaVic.py
 ```
 > the second option is used for examples thorughout this readme document
 
 ## prereq 3. Install/Configure Database - PostGIS 17 (or above)
 
-**Note: You only require tsteps 3 & 4 if you are going to sync data locally. If you are only using deltaVic to view metadata in the GUI: all you will require is git and python, and to complete the setup's "register" steps.**
+**Note: You only require prereq steps 3 & 4 if you are going to sync data locally. If you are only using deltaVic to view metadata in the GUI, you only require is git and python, and to complete the setup's "register" steps.**
 
 [Install PostGres](https://www.postgresql.org/download/) v17 or above.
 > If your installer offers, add the spatial extension PostGIS.
@@ -74,7 +76,7 @@ GRANT CREATE ON DATABASE vicmap TO vicmap;
 
 ## prereq 4: Database GUI
 
-Install a database client to allow access to your local database instance, (for maintenance and configuration.).
+Install a database client to allow direct access to interrogate your local database instance, (for maintenance and configuration.).
 PGAdmin4 generally comes packaged with PostGres, but I would recommend [installing DBeaver](https://dbeaver.io/download/) as it has a built in geometry viewer.
 
 # Setup and Configuration
@@ -101,7 +103,7 @@ Once QA passes, the GUI's Meta tab will now be able to be populated.
 
 ### Database configuration (bottom frame)
 
-Enter your database endpoint, port, instance Name, username and password that were configured in prerequisite 3 above.
+Enter your database endpoint, port, instance Name, username and password that were configured in prerequisite 3 above. (localhost/vicmap/vicmap/vicmap by recommendation)
 
 Press the "Test DB" button in the QA panel which will ensure that your configurations are correct.
 
@@ -132,9 +134,11 @@ Prompts will ask for the database connection details and the location of your po
 
 # SELECT your target datasets
 
-By default, no datasets will be selected for synchronisation. Access you database using DBeaver or a command line client such as psql to set the column active=true in the data table.
+By default, no datasets will be selected for synchronisation.
 
-GUI: Enter the **Meta** tab and select which schemas or datasets you wish to be active to syncronise to your local datastore by sing the checkboxes or the all" buttons within each schema's layers.
+GUI: Enter the **Meta** tab and select which schemas or datasets you wish to be active to syncronise to your local datastore by sing the checkboxes or the **all**"** buttons at the top of the layers tab.
+
+Other: Access your database using DBeaver or a command line client such as psql to set the column active=true in the data table.
 
 Via the database (DBeaver, psql or other):
 ```sql
@@ -149,7 +153,7 @@ update vm_meta.data set active=true where not (identity like 'vtt%') and sup='VT
 ```
 
 # POPULATE
-GUI: Hit the sync button on teh Setup page (not wholly recommended in GUI, as the GUI is single threaded and it will hang while the sync occurs.). logging will go to the window from where you executed the python script.
+GUI: Hit the sync button on the Setup page (not wholly recommended in GUI, as the GUI is single threaded and it will hang while the sync occurs.). Logging will go to the window from where you executed the python script.
 
 CLI: Manually run the sync comamnd via a terminal:
 ```bash
@@ -169,8 +173,8 @@ deltaVic.py sync
 Please set it for a random minute duing the hour to spread the load on our API service.
 Ensure that the process is not already running when instantiating.
 
-The initial seed should take 2-3 hours, depending on your bandwidth for the 43GB of data. (significantly less if you are not synccing all the tables).
+An initial full seed should take 2-3 hours, depending on your bandwidth for the 43GB of table data. (significantly less if you are not synccing all the tables).
 
 The incremental update each week for vicmap should take less than 10 minutes for all datasets, (60-100 each week). If it takes longer please reach out to vicmap@transport.vic.gov.au for support with any observations.
 
-The main Vicmap contracts **VLAT** (blue layers in the gui) and **VTT** (green layers) data generally updates on a Friday night after business hours, but can be late, (so don't rely exclusively on a saturday night job). Change management and in house **MISC** data loads (brown layers) can occur at any time during the week.
+The main Vicmap contracts **VLAT** (blue layers in the gui) and **VTT** (green) data generally updates on a Friday night after business hours, but can be late, (so don't rely exclusively on a saturday night job). Change management and in house **MISC** data loads (brown) can occur at any time during the week.
