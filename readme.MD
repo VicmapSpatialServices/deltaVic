@@ -2,10 +2,10 @@
 
 This project allows download and sync of the vicmap suite of data products to a local PostGis database.
 
-Author: Warwick Wilson
-Company: Department of Transport and Planning (Victoria)
-Date: 13/11/23
-Revised: 18/6/25
+Author: Warwick Wilson  
+Company: Department of Transport and Planning (Victoria)  
+Date: 13/11/23  
+Revised: 18/6/25  
 
 # Prerequisites
 
@@ -95,7 +95,7 @@ The GUI consists of three tabs:
 ### Registration (top frame)
 
 Enter your email in the relevant field and press the "Refresh" button in the QA panel. This will generate a client ID and a validation email.
-Go to your email and click the validation link. Once done, return to the GUI and press "Refresh" again.
+> Go to your email and click the validation link. Once done, return to the GUI and press "Refresh" again.
 A validated email will obtain the default VLRS OpenData API key.
 
 Once QA passes, the GUI's Meta tab will now be able to be populated.
