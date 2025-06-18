@@ -1,6 +1,6 @@
 [default]
 name = deltaVic
-log_level = 20
+log_level = 10
 email =
 baseUrl =
 dbHost =
@@ -11,3 +11,6 @@ dbName =
 dbClientPath =
 client_id =
 api_key =
+sync_all =
+regComplete =
+dbComplete =
