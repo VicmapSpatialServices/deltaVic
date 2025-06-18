@@ -9,7 +9,11 @@ Revised: 18/6/25
 
 # Prerequisites
 
-## prereq 1. deltaVic Git repo
+## prereq 1. install git
+
+Install a git client with all the defaults. Good download sites are [git-scm](https://git-scm.com/downloads) or [Atlassian](https://www.atlassian.com/git/tutorials/install-git) which has more detailed instructions.
+
+## prereq 2. deltaVic git repo
 
 Clone this repository locally to the machine you wish to use.
 I recommend using an IDE such as [VS Code](https://code.visualstudio.com/download) to view and make edits to the python workspace. (Pycharm, Idle or a text editor are of course viable options, among many others.)
@@ -20,7 +24,7 @@ git clone https://github.com/VicmapSpatialServices/deltaVic.git VLRS
 ```
 deltaVic can be downloaded from github without git, (by downloading a zip file from the **Code** button, but using git means you can update the application as improvements occur.).
 
-## prereq 2. Python 3.10 (or above)
+## prereq 3. Python 3.10 (or above)
 
 [Install python](https://www.python.org/downloads/) version 3.10 or better, (3.13 recommended)
 > ensure you include "tk" when installing if you wish to use the GUI (it has been built in **tk**inter.).
@@ -47,9 +51,9 @@ python3.13 deltaVic.py
 ```
 > the second option is used for examples thorughout this readme document
 
-## prereq 3. Install/Configure Database - PostGIS 17 (or above)
+## prereq 4. Install/Configure Database - PostGIS 17 (or above)
 
-**Note: You only require prereq steps 3 & 4 if you are going to sync data locally. If you are only using deltaVic to view metadata in the GUI, you only require is git and python, and to complete the setup's "register" steps.**
+**Note: You only require prereq steps 4 & 5 if you are going to sync data locally. If you are only using deltaVic to view metadata in the GUI, you only require is git and python, and to complete the setup's "register" steps.**
 
 [Install PostGres](https://www.postgresql.org/download/) v17 or above.
 > If your installer offers, add the spatial extension PostGIS.
@@ -74,7 +78,7 @@ GRANT CREATE ON DATABASE vicmap TO vicmap;
 > NB: EDB installer can use a second step called stack builder to install the spatial extension for you.
 > NB2: Minor cleanup -- You can delete the tiger/tiger_data/topoology schemas.
 
-## prereq 4: Database GUI
+## prereq 5: Database GUI
 
 Install a database client to allow direct access to interrogate your local database instance, (for maintenance and configuration.).
 PGAdmin4 generally comes packaged with PostGres, but I would recommend [installing DBeaver](https://dbeaver.io/download/) as it has a built in geometry viewer.
