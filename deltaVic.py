@@ -2,7 +2,7 @@ import sys, os, logging, traceback
 from datetime import datetime, timedelta
 
 from assets import DB, FU, Logger, Config, LyrReg
-from assets import Setup, Synccer, GUI
+from assets import Setup, Synccer, GuiControl, Supplies
 
 rootLog = Logger().get()
 # rootLog.level = logging.DEBUG
@@ -24,7 +24,7 @@ class vmdelta():
     match self.action:
       case "gui":
         print("running gui")
-        gui = GUI(self.cfgStg)
+        gui = GuiControl(self.cfgStg)
         gui.mainloop()
       case "setup":
         Setup(self.cfgStg).run()
@@ -42,8 +42,10 @@ class vmdelta():
         # set only core vicmap layers
         Setup(self.cfgStg).core()
       case "upload":
-        _dbExp = DB(Config('config.ini', self.task))
-        return Synccer(self.config, _dbExp).upload(self.thing)
+        _cfg = Config('config.ini', self.task) # task is stage "default"
+        _ident = self.thing # thing is the layer name, qualified.
+        _dbExp = DB(_cfg)
+        return Synccer(self.config, _dbExp).upload(_ident, Supplies.DIFF)
       case 'fixErrs':
         _db = DB(self.config)
         synccer = Synccer(self.config, _db)
@@ -75,7 +77,7 @@ class vmdelta():
         # synccer.restore()
         synccer.dump()
       case "_":
-        gui = GUI(None, None)
+        gui = GuiControl(None, None)
         gui.mainloop()
         # print("print: action was not specified") # default to sync?
         # logging.info("action was not specified") # default to sync?

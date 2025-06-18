@@ -16,10 +16,10 @@ class ApiUtils():
 
   def post(self, endp:str, data:dict):
     data.update({"client_id":self.client_id,"api_key":self.api_key})
-    logging.debug(f" -> Submitting POST api call to /{endp}")
+    logging.debug(f" -> Submitting POST api call to /{endp} ... data: {data}")
     response = requests.post(f"{self.url}/{endp}", json=data, headers=self.headers)#, auth=self.auth) # , files=files
     if response.status_code != 200:
-      raise Exception(f"The {endp} endpoint was not successful. ErrCode={response.status_code} ErrMsg={response.text}")
+      raise Exception(f"The {endp} endpoint was not successful. ErrCode={response.status_code} ErrMsg={response.text} data={data}")
     return response.json()
 
   def put(self, s3_url, fPath): # uses s3-promise-link.

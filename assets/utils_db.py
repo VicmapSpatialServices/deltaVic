@@ -17,7 +17,8 @@ class PGClient():
     self.dbClientPath = dbClientPath
 
     """Database connections manages using PGPASSFILE as outlined in https://www.postgresql.org/docs/9.3/libpq-pgpass.html"""
-    pgpassFileName = f".{db.dbname}_{str(time.time()).replace(".", "")}.pgpgpass"
+    _strTime = str(time.time()).replace('.','')
+    pgpassFileName = f".{db.dbname}_{_strTime}.pgpgpass"
     self.pgPassPath = os.path.join(dPath, pgpassFileName)
     
   def clientPath(self, client):
@@ -61,7 +62,7 @@ class PGClient():
     # NB: will not drop table if it has a dependant view, resulting in duplicate records.
     if plain:
       # NB: command_parts array failing on password for psql. Introduced subprocess caller instead
-      command = f"{self.clientPath("psql")} -h localhost -d vicmap -U vicmap -f {fileStr}"
+      command = f"{self.clientPath('psql')} -h localhost -d vicmap -U vicmap -f {fileStr}"
       os.environ["PGPASSWORD"] = "vicmap"
       _msgStr = FU.runSubprocess(command)
       del os.environ["PGPASSWORD"] # os.environ.pop("PGPASSWORD")
@@ -173,7 +174,7 @@ class DB():
   
   def getTables(self, schema:str):
     """ get all table names from a schema """
-    sqlStr = f"SELECT table_name FROM information_schema.tables WHERE table_schema = '{schema}'"
+    sqlStr = f"SELECT table_name FROM information_schema.tables WHERE table_schema = '{schema}' order by table_name"
     data = self.rows(sqlStr)
     return [t[0] for t in data] if data else []# return a list of the table names
 

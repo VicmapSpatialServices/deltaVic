@@ -115,23 +115,30 @@ class Config():
     self.cp = configparser.ConfigParser()
     self.cp.optionxform = str # keep it case sensitive
     if not self.cp.read(self.cfgFile):
-      # create file
-      self.cp[stg] = {'name':'deltaVic','log_level':20,'email':'somebody@example.org','baseUrl':'https://0mgxefxoib.execute-api.ap-southeast-2.amazonaws.com/vmmgr/'}
-      # self.cp.add_section('default')
-      self.write()
+      self.initDefaults(stg)
     self.setStage(stg)
+  def initDefaults(self, stg):
+    # self.cp.add_section('default')
+    self.cp[stg] = {'name':'deltaVic',
+      'baseUrl':'https://0mgxefxoib.execute-api.ap-southeast-2.amazonaws.com/vmmgr/',
+      'log_level':20,
+      'sync_all':False,
+      'regComplete': False,
+      'dbComplete': False
+      }
+    # update config file
+    self.write()
+
   def write(self):#, cfg):
     with open(self.cfgFile, 'w') as newCfg:
       self.cp.write(newCfg)
   def append(self):#, cfg):
     with open(self.cfgFile, 'a') as oldCfg:
       self.cp.write(oldCfg)
-  def setStage(self, stage):
-    if stage not in self.cp.sections():
-      # self.cp.add_section(stage)
-      self.cp[stage] = {'name':'deltaVic','log_level':20,'email':'somebody@example.org','baseUrl':'https://0mgxefxoib.execute-api.ap-southeast-2.amazonaws.com/vmmgr/'}
-      self.write()
-    self.stg = self.cp[stage]
+  def setStage(self, stg):
+    if stg not in self.cp.sections():
+      self.initDefaults(stg)
+    self.stg = self.cp[stg]
   def getStage(self):
     return self.stg.name
   def get(self, key):
@@ -153,6 +160,13 @@ class Config():
   def keys(self):
     return dict(self.cp.items('default')).keys()
 
+  def assess(self, reqTpl):
+    # cfgReqTuples is of form (key, default, description)
+    key, default, desc = reqTpl
+    if not self.get(key):
+      val = input(f"Enter {desc} (default:{default}): ") or default
+      self.set({key:val})
+  
   def keysExist(self, keyArr): #cfg, 
     # test vars from config that should exist
     for var in keyArr:
@@ -191,6 +205,7 @@ class Test():
 class Supplies(dict):
   # load types
   FULL = "full" # seed
+  DIFF = "diff" # differencing - upload full table and let VLRS sort out the changes.
   INC = "inc" # incremental
 
   @staticmethod
