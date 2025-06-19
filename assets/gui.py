@@ -272,7 +272,7 @@ class SubFrMetaLyrs(SubFrMeta):
      # clear current controls
     [lyrBtn.destroy() for lyrBtn in self.lyrBtns]
     [lyrChk.destroy() for lyrChk in self.lyrChks]
-    [lyrVar.destroy() for lyrVar in self.lyrVars]
+    # [lyrVar.destroy() for lyrVar in self.lyrVars]
     
     self.lyrBtns, self.lyrChks = [], []
 
