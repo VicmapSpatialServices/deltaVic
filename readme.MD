@@ -187,23 +187,23 @@ The main Vicmap contracts **VLAT** (blue layers in the gui) and **VTT** (green) 
 
 A containerised version of the application is available with [docker](https://docs.docker.com/engine/install/). To build the docker image, run the following command from the repository's root directory:
 
-```console
+```bash
 docker build -t deltavic .
 ```
 
 ## Configuration setup
 
-DeltaVic can be configured using the containerised application.
+deltaVic can be configured using the containerised application.
 
 1. Create a new empty configuration file:
 
-    ```console
+    ```bash
     touch config.ini
     ```
 
 2. Launch the configuration setup wizard:
 
-    ```console
+    ```bash
     docker run -v ${PWD}/config.ini:/deltaVic/config.ini --network=host -it deltavic setup
     ```
 
@@ -217,7 +217,7 @@ DeltaVic can be configured using the containerised application.
 
 A deltaVic sync can be run like so:
 
-```console
+```bash
 docker run -v ${PWD}/config.ini:/deltaVic/config.ini --network=host deltavic sync
 ```
 
