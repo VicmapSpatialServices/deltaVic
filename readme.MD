@@ -182,3 +182,44 @@ An initial full seed should take 2-3 hours, depending on your bandwidth for the 
 The incremental update each week for vicmap should take less than 10 minutes for all datasets, (60-100 each week). If it takes longer please reach out to vicmap@transport.vic.gov.au for support with any observations.
 
 The main Vicmap contracts **VLAT** (blue layers in the gui) and **VTT** (green) data generally updates on a Friday night after business hours, but can be late, (so don't rely exclusively on a saturday night job). Change management and in house **MISC** data loads (brown) can occur at any time during the week.
+
+# Docker Installation
+
+A containerised version of the application is available with [docker](https://docs.docker.com/engine/install/). To build the docker image, run the following command from the repository's root directory:
+
+```bash
+docker build -t deltavic .
+```
+
+## Configuration setup
+
+deltaVic can be configured using the containerised application.
+
+1. Create a new empty configuration file:
+
+    ```bash
+    touch config.ini
+    ```
+
+2. Launch the configuration setup wizard:
+
+    ```bash
+    docker run -v ${PWD}/config.ini:/deltaVic/config.ini --network=host -it deltavic setup
+    ```
+
+    - The `-v ${PWD}/config.ini:/deltaVic/config.ini` option mounts the `config.ini` file into the container to store the configuration persistently.
+    - The `--network=host` flag ensures that the container can access your local network. This allows the container to access PostGIS running on the host machine.
+    - The `-it` option enables interactive mode, allowing you to provide input directly to the setup wizard.
+
+3. The database tables can then be configured by following the instructions provided [above](#select-your-target-datasets).
+
+## Running a sync
+
+A deltaVic sync can be run like so:
+
+```bash
+docker run -v ${PWD}/config.ini:/deltaVic/config.ini --network=host deltavic sync
+```
+
+- The `-v ${PWD}/config.ini:/deltaVic/config.ini` option mounts the `config.ini` file into the container.
+- The `--network=host` flag ensures that the container can access your local network.
