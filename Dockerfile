@@ -10,8 +10,11 @@ RUN apt update -y \
 
 # Add the PostgreSQL apt repository
 RUN install -d /usr/share/postgresql-common/pgdg
-RUN curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc --fail https://www.postgresql.org/media/keys/ACCC4CF8.asc
-RUN sh -c 'echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+RUN curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+    --fail https://www.postgresql.org/media/keys/ACCC4CF8.asc
+RUN sh -c 'echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
+    https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > \
+    /etc/apt/sources.list.d/pgdg.list'
 
 # Install the PostgreSQL 17 client
 RUN apt update -y \
