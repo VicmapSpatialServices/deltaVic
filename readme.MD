@@ -183,19 +183,43 @@ The incremental update each week for vicmap should take less than 10 minutes for
 
 The main Vicmap contracts **VLAT** (blue layers in the gui) and **VTT** (green) data generally updates on a Friday night after business hours, but can be late, (so don't rely exclusively on a saturday night job). Change management and in house **MISC** data loads (brown) can occur at any time during the week.
 
-## Docker Installation
+# Docker Installation
 
-To build a containerised version of the application using docker, run the following command from the project's root directory:
+A containerised version of the application is available with [docker](https://docs.docker.com/engine/install/). To build the docker image, run the following command from the repository's root directory:
 
 ```console
 docker build -t deltavic .
 ```
 
-The deltaVic commands can then be run like so:
+## Configuration setup
+
+DeltaVic can be configured using the containerised application.
+
+1. Create a new empty configuration file:
+
+    ```console
+    touch config.ini
+    ```
+
+2. Launch the configuration setup wizard:
+
+    ```console
+    docker run -v ${PWD}/config.ini:/deltaVic/config.ini --network=host -it deltavic setup
+    ```
+
+    - The `-v ${PWD}/config.ini:/deltaVic/config.ini` option mounts the `config.ini` file into the container to store the configuration persistently.
+    - The `--network=host` flag ensures that the container can access your local network. This allows the container to access PostGIS running on the host machine.
+    - The `-it` option enables interactive mode, allowing you to provide input directly to the setup wizard.
+
+3. The database tables can then be configured by following the instructions provided [above](#select-your-target-datasets).
+
+## Running a sync
+
+A deltaVic sync can be run like so:
 
 ```console
 docker run -v ${PWD}/config.ini:/deltaVic/config.ini --network=host deltavic sync
 ```
 
-- The `-v ${PWD}/config.ini:/deltaVic/config.ini` option mounts the local `config.ini` into the container. You may need to replace `${PWD}` with the absolute path to the config file.
-- The `--network=host` option allows the container to access the host's network, use this if the PostGIS server is running locally.
+- The `-v ${PWD}/config.ini:/deltaVic/config.ini` option mounts the `config.ini` file into the container.
+- The `--network=host` flag ensures that the container can access your local network.
