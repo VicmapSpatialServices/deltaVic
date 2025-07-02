@@ -19,6 +19,7 @@ class PGClient():
     """Database connections manages using PGPASSFILE as outlined in https://www.postgresql.org/docs/9.3/libpq-pgpass.html"""
     _strTime = str(time.time()).replace('.','')
     pgpassFileName = f".{db.dbname}_{_strTime}.pgpgpass"
+    if not os.path.exists(dPath): os.makedirs(dPath)
     self.pgPassPath = os.path.join(dPath, pgpassFileName)
     
   def clientPath(self, client):
@@ -26,7 +27,6 @@ class PGClient():
     if platform.system().lower() == 'windows':
       path += '.exe'
     return path
-  
   
   def create_credential(self):
     # print(f"create_credential: {self.db.getCredStr()}")

@@ -13,6 +13,8 @@ Revised: 18/6/25
 
 Install a git client with all the defaults. Good download sites are [git-scm](https://git-scm.com/downloads) or [Atlassian](https://www.atlassian.com/git/tutorials/install-git) which has more detailed instructions.
 
+>You can download a zip file of the code from github instead, (from the **Code** button dropdown). Using git is better though, as you can pull changes and bugfixes more easily.
+
 ## prereq 2. deltaVic git repo
 
 Clone this repository locally to the machine you wish to use.

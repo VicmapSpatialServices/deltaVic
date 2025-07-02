@@ -351,15 +351,15 @@ class SubFrMetaLyrInfo(SubFrMeta):
       _frUpload.grid(row=0, column=3, columnspan=4, sticky='e')
     
     ## Table Columns
-    _colData = [(col,type) for col,type in layerMeta['columns'].items()]
+    _colData = [(col,type) for col,type in layerMeta['columns'].items()] if layerMeta['columns'] else []
     _colcols = [('Column',120,'e'),('Type',120,'w')]
     _cols = TView(self, 'Columns', _colcols, 1, 0, _colData)
     ## Table Indexes
-    _idxData = [(idx[1],idx[0],idx[2]) for idx in layerMeta['indexes']]
+    _idxData = [(idx[1],idx[0],idx[2]) for idx in layerMeta['indexes']] if layerMeta['indexes'] else []
     _idxCols = [('Column',120,'w'),('idx_Name',120,'w'),('Type',50,'w')]
     _idxs = TView(self, 'Indexes', _idxCols, 1, 3, _idxData)
     ## Dump History Tree
-    _ldData = [(dump[2], dump[1], datetime.fromisoformat(dump[3]).strftime('%d/%m/%Y %H:%M'),dump[4],dump[5],dump[6]) for dump in layerMeta['pgDumps']]
+    _ldData = [(dump[2], dump[1], datetime.fromisoformat(dump[3]).strftime('%d/%m/%Y %H:%M'),dump[4],dump[5],dump[6]) for dump in layerMeta['pgDumps']] if layerMeta['pgDumps'] else []
     _ldData.sort(key = lambda x:x[0], reverse=True)
     _ldCols = [('Supply Version',50,'w'),('Type',50,'w'),('Date',100,'w'),('Adds',80,'e'),('Dels',80,'e'),('Count',80,'e')]
     _loads = TView(self, 'Update History', _ldCols, 3, 0, _ldData, 7) #'Type':75,
