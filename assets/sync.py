@@ -113,7 +113,7 @@ class Synccer():
       PGClient(self.db, self.cfg.get('dbClientPath')).dump_file(tgtQual, fPath)
       
       #register the upload on VLRS and get an s3promise-link
-      data = {"dset":srcQual,"fname":fPath,"sup_type":Supplies.INC, "relation":relation}
+      data = {"dset":srcQual,"fname":fPath,"sup_type":supType, "relation":relation}
       if md_uuid: data.update({"md_uuid":md_uuid})
       if geomType: data.update({"geomType":geomType})
 
