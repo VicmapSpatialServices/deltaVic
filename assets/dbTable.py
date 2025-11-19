@@ -132,7 +132,14 @@ class LyrReg(DBTable):
   def merge(self, dbDsets):
     if others := [d for d in dbDsets if d.identity==self.identity]:
       [setattr(self, col, getattr(others[0], col)) for col in self.cols]
+    else: # dirty hack for new datasets to be default MISC.
+      self.sup = 'MISC'
 
+  def delSql(self):
+    sqlStr = f"delete from {self.name} where identity=%s"
+    sqlParams = (self.identity, )
+    return sqlStr, sqlParams
+  
 class Schemas():#list
   def __init__(self, type, cfg):
     # super().__init__(self)

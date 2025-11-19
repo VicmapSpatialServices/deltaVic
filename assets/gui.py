@@ -119,7 +119,7 @@ class FrMetaData(ttk.Frame):
   def __init__(self, container, guic, type):
     super().__init__(container, style="bad.TFrame")#"bad.TFrame")#
     self.guic = guic
-    self.type = type # is it remote ('Meta') ro local ('Data')
+    self.type = type # is it remote ('Meta') or local ('Data')
     self.schDepth = 0
     self.data = Schemas(self.type, self.guic.cfg)
     
@@ -280,6 +280,7 @@ class SubFrMetaLyrs(SubFrMeta):
     self.nrLyrs = len(_sch.lyrs)
     self.lyrHdrStr.set(f"Layers ({self.nrLyrs})")
     # _lyrs = [d.tbl for d in _sch.lyrs]
+    _sch.lyrs.sort(key = lambda lyr:lyr.identity)
     self.setLyrs(_sch.lyrs)
     # self.update_idletasks()
     self.canvas.configure(yscrollcommand=self.lyrScrollbar.set)
@@ -347,24 +348,27 @@ class SubFrMetaLyrInfo(SubFrMeta):
       layerMetaLink.grid(row=0, column=3, columnspan=4, sticky='e')
     if self.owner.type == "Data":
       print(lyr)
-      _frUpload = self.mkFrUpload(lyr)
+      _frUpload = self.mkFrUpload(lyr, layerMeta)
       _frUpload.grid(row=0, column=3, columnspan=4, sticky='e')
     
-    ## Table Columns
-    _colData = [(col,type) for col,type in layerMeta['columns'].items()] if layerMeta['columns'] else []
-    _colcols = [('Column',120,'e'),('Type',120,'w')]
-    _cols = TView(self, 'Columns', _colcols, 1, 0, _colData)
-    ## Table Indexes
-    _idxData = [(idx[1],idx[0],idx[2]) for idx in layerMeta['indexes']] if layerMeta['indexes'] else []
-    _idxCols = [('Column',120,'w'),('idx_Name',120,'w'),('Type',50,'w')]
-    _idxs = TView(self, 'Indexes', _idxCols, 1, 3, _idxData)
-    ## Dump History Tree
-    _ldData = [(dump[2], dump[1], datetime.fromisoformat(dump[3]).strftime('%d/%m/%Y %H:%M'),dump[4],dump[5],dump[6]) for dump in layerMeta['pgDumps']] if layerMeta['pgDumps'] else []
-    _ldData.sort(key = lambda x:x[0], reverse=True)
-    _ldCols = [('Supply Version',50,'w'),('Type',50,'w'),('Date',100,'w'),('Adds',80,'e'),('Dels',80,'e'),('Count',80,'e')]
-    _loads = TView(self, 'Update History', _ldCols, 3, 0, _ldData, 7) #'Type':75,
+    if layerMeta:
+      ## Table Columns
+      _colData = [(col,type) for col,type in layerMeta['columns'].items()] if layerMeta['columns'] else []
+      _colcols = [('Column',120,'e'),('Type',120,'w')]
+      _cols = TView(self, 'Columns', _colcols, 1, 0, _colData)
+      ## Table Indexes
+      _idxData = [(idx[1],idx[0],idx[2]) for idx in layerMeta['indexes']] if layerMeta['indexes'] else []
+      _idxCols = [('Column',120,'w'),('idx_Name',120,'w'),('Type',50,'w')]
+      _idxs = TView(self, 'Indexes', _idxCols, 1, 3, _idxData)
+      ## Dump History Tree
+      _ldData = [(dump[2], dump[1], datetime.fromisoformat(dump[3]).strftime('%d/%m/%Y %H:%M'),dump[4],dump[5],dump[6]) for dump in layerMeta['pgDumps']] if layerMeta['pgDumps'] else []
+      _ldData.sort(key = lambda x:datetime.strptime(x[2], "%d/%m/%Y %H:%M"), reverse=True)
+      _ldCols = [('Supply Version',50,'w'),('Type',50,'w'),('Date',100,'w'),('Adds',80,'e'),('Dels',80,'e'),('Count',80,'e')]
+      _loads = TView(self, 'Update History', _ldCols, 3, 0, _ldData, 7) #'Type':75,
+    else:
+      ttk.Label(self, text='New Dataset', border=3).grid(row=0, column=0, padx=10)
 
-  def mkFrUpload(self, lyr):
+  def mkFrUpload(self, lyr, lyrMeta):
     _fr = Frame(self, borderwidth=1, relief="raised", bg=StyMan.bgClrPass)
     ttk.Label(_fr, text='Upload', border=3).grid(row=0, column=0, padx=10)
     lyrUploadInc = Button(_fr, text="INC", padx=5, pady=2, background="snow3", bg=StyMan.qaClrPass, command=lambda:self.upload(lyr, Supplies.INC))
@@ -375,15 +379,24 @@ class SubFrMetaLyrInfo(SubFrMeta):
     lyrUploadFull = Button(_fr, text="FULL", padx=5, pady=2, background="snow3", bg=StyMan.qaClrPass, command=lambda:self.upload(lyr, Supplies.FULL))
     lyrUploadFull.grid(row=0, column=3, pady=5)
     
+    if not lyrMeta: # new dataset, full upload only
+      lyrUploadInc.configure(fg='white', state="disabled", bg=StyMan.bgClrFail)#s
+      lyrUploadDiff.configure(fg='white', state="disabled", bg=StyMan.bgClrFail)
     if not self.guic.uploadAllowed(lyr):
-      lyrUploadInc.configure(fg='white', bg=StyMan.bgClrFail)#state="disabled", 
-      lyrUploadDiff.configure(fg='white', bg=StyMan.bgClrFail)
-      lyrUploadFull.configure(fg='white', bg=StyMan.bgClrFail)
+      lyrUploadInc.configure(fg='white', state="disabled", bg=StyMan.bgClrFail)#state="disabled", 
+      lyrUploadDiff.configure(fg='white', state="disabled", bg=StyMan.bgClrFail)
+      lyrUploadFull.configure(fg='white', state="disabled", bg=StyMan.bgClrFail)
     return _fr
     
   def getLyrMetadata(self, ident):
     api = ApiUtils(self.guic.cfg.get('baseUrl'), self.guic.cfg.get('api_key'), self.guic.cfg.get('client_id'))
-    return api.post("data", {"dset": f"{ident}"})
+    response = None
+    try:
+      response = api.post("data", {"dset": f"{ident}"})
+    except Exception as ex:
+      logging.warning(ex)
+    return response
+
   
   # def geonet(self, layerMeta):
   #   webbrowser.open_new(layerMeta['metadata'])
@@ -712,6 +725,7 @@ class SubFrCtrl(SubFr):
     while(synccer.assess()):
       synccer.run()
     _db.close()
+    print("sync complete")
 
     self.refresh()
 

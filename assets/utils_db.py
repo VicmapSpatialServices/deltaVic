@@ -189,7 +189,7 @@ class DB():
     pkeyType = [cType for cName, cType in colsDict.items() if cName==pkey][0]
     logging.debug(f"pkeyType: {pkeyType}")
 
-    if pkey=='none' or not any(pkeyType.startswith(cType) for cType in ['int','bigint']):
+    if pkey=='none' or not any(pkeyType.startswith(cType) for cType in ['int','smallint','bigint']):
       sqlStr = f"SELECT {_ufiCr}, 0, COUNT(*), 0 FROM {tblQual}"
     else:
       sqlStr = f"SELECT {_ufiCr}, max({pkey}), COUNT({pkey}), SUM({pkey}) FROM {tblQual}"

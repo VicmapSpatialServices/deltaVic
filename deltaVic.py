@@ -72,10 +72,13 @@ class vmdelta():
           # if dset.relation == 'view': _db.dropView(dset.identity)
         _db.truncate("vm_meta.data")
       case 'test':
-        _db = DB(self.config)
-        synccer = Synccer(self.config, _db)
-        # synccer.restore()
-        synccer.dump()
+        # _db = DB(self.config)
+        # synccer = Synccer(self.config, _db)
+        # # synccer.restore()
+        # synccer.dump()
+        print(sys.path)
+        # for key, value in os.environ.items():
+        #   print(f'{key}: {value}')
       case "_":
         gui = GuiControl(None, None)
         gui.mainloop()

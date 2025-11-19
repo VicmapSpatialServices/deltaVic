@@ -30,7 +30,7 @@ class Synccer():
     self.views = [ll for ll in _layers if ll.relation=='view']
     
     if _nmbr := len(self.tables) + len(self.views):
-      logging.info(f'To Process: {len(self.tables)} table and {len(self.views)} views')
+      logging.info(f'To Process: {len(self.tables)} table(s) and {len(self.views)} view(s)')
     return _nmbr
   
   def resolve(self):
@@ -57,7 +57,9 @@ class Synccer():
     logging.debug("checking local layers against remote")
     for name,lyr in _local.items():
       if not (_vmLyr := _remote.get(name)):
-        logging.warning(f"Dataset {name} doesn't exist in the remote vicmap_master") # auto delete? in qa at start/end?
+        logging.warning(f"Dataset {name} doesn't exist in the remote vicmap_master, reflecting locally.") # auto delete? in qa at start/end?
+        self.db.dropTable(name) # drop the table if it exists
+        self.db.execute(*_local.get(name).delSql()) # remove the meta.data record.
         continue
       # Note conditions: only compare those datasets present locally as active, in a complete state and not in err.
       if lyr.active and lyr.status == LyrReg.COMPLETE:
@@ -113,7 +115,7 @@ class Synccer():
       PGClient(self.db, self.cfg.get('dbClientPath')).dump_file(tgtQual, fPath)
       
       #register the upload on VLRS and get an s3promise-link
-      data = {"dset":srcQual,"fname":fPath,"sup_type":Supplies.INC, "relation":relation}
+      data = {"dset":srcQual,"fname":fPath,"sup_type":supType, "relation":relation}
       if md_uuid: data.update({"md_uuid":md_uuid})
       if geomType: data.update({"geomType":geomType})
 
@@ -131,6 +133,7 @@ class Synccer():
       return True # f"Successfully uploaded {fPath}"
     
     except Exception as ex:
+      logging.info(traceback.format_exc())
       errStr = f"Failed to upload {fPath}: {str(ex)}"
       logging.error(errStr)
       return False # 
