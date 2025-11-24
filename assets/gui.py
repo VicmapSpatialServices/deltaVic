@@ -714,7 +714,7 @@ class SubFrCtrl(SubFr):
   def fix(self):
     print("fix all error datasets by Q'ing them for reseeding")
     _db = DB(self.guic.cfg)
-    _db.execute("update vm_meta.data set status='QUEUED', sup_ver=-1, err=false where err=true")
+    _db.fixErrs()
     _db.close()
 
   def sync(self):

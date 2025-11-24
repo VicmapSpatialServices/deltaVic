@@ -44,10 +44,10 @@ class Synccer():
     logging.info(f"Layer state: {len(_all_local)} in vm_meta.data, {len([i for i in _local if _local[i].active])} active, {len(_errs)} errors. {len(_remote)} available from vicmap_master")
 
     # scroll thorugh the remote datasets and add any that don't exist locally
+    # TODO: Check that the existing items have not changed, [ie: a pkey or geomType change -> md5(colSubset)?]
     logging.debug("checking remote layers exist locally")
     for name, dset in _remote.items():
       if not (_lyr := _local.get(name) or _errs.get(name)):
-      # if name not in list(_local.keys()).extend(list(_errs.keys())):
         dset.sup_ver=-1 # new record gets a negative supply-id so it matches the latest seed.
         dset.sup_type=Supplies.FULL # seed is full.
         if self.cfg.get('sync_all') == "True": dset.active=True
@@ -57,7 +57,7 @@ class Synccer():
     logging.debug("checking local layers against remote")
     for name,lyr in _local.items():
       if not (_vmLyr := _remote.get(name)):
-        logging.warning(f"Dataset {name} doesn't exist in the remote vicmap_master, reflecting locally.") # auto delete? in qa at start/end?
+        logging.warning(f"Dataset {name} doesn't exist in the remote vicmap_master, reflecting locally.") # auto delete withdrawn layers -> could lead to an isssue if apikey has changed to a reduced read set.
         self.db.dropTable(name) # drop the table if it exists
         self.db.execute(*_local.get(name).delSql()) # remove the meta.data record.
         continue
@@ -255,6 +255,7 @@ class Sync():
       logging.debug(f"{tblCount} {tblChkSum}")
       
     except Exception as ex:
+      logging.error(traceback.format_exc())
       logging.warning(f"{self.lyr.identity} did not return stats: {str(ex)}")
       raise Exception(f"Problem getting stats: {str(ex)}")
     

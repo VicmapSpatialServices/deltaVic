@@ -47,10 +47,11 @@ class vmdelta():
         _dbExp = DB(_cfg)
         return Synccer(self.config, _dbExp).upload(_ident, Supplies.DIFF)
       case 'fixErrs':
+        print("fix all error datasets by Q'ing them for reseeding")
         _db = DB(self.config)
-        synccer = Synccer(self.config, _db)
-        synccer.fixErrs() # repairs datasets in error by provoking a seed supply.
-      
+        _db.fixErrs()
+        _db.close()
+        
       case "clean":
         if self.task == "db": # analyse and vaccuume the tables
           _db = DB(self.config)

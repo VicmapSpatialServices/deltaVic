@@ -186,7 +186,7 @@ class DB():
   def getTblStats(self, tblQual, ufiCreatedCol, pkey):
     colsDict = self.getAllColsDict(tblQual)
     _ufiCr = f"max({ufiCreatedCol})" if ufiCreatedCol in colsDict.keys() else "now()::timestamp"
-    pkeyType = [cType for cName, cType in colsDict.items() if cName==pkey][0]
+    pkeyType = [cType for cName, cType in colsDict.items() if cName==pkey][0] # throws IndexError if pkey does not exist in colset.
     logging.debug(f"pkeyType: {pkeyType}")
 
     if pkey=='none' or not any(pkeyType.startswith(cType) for cType in ['int','smallint','bigint']):
@@ -200,6 +200,10 @@ class DB():
       return stats
     else:
       raise Exception("Could not get table stats for {}. Does it exist?".format(tblQual))
+  
+  def fixErrs(self):
+    sqlStr = "update vm_meta.data set status='QUEUED', sup_ver=-1, err=false, extradata=jsonb(extradata)-'error' where err=true"
+    self.execute(sqlStr)
   
   def analVac(self, ident): # analyze and vaccuume
     logging.debug(f"{ident}: Analysing and Vaccuuming")
