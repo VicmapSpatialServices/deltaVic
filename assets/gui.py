@@ -333,6 +333,7 @@ class SubFrMetaLyrInfo(SubFrMeta):
   def __init__(self, owner, guic):
     super().__init__(owner, guic)
     self.owner = owner
+    self.lyrMeta = None
 
   def showLyrDetails(self, lyr):
     # print(f"{lyr}")
@@ -341,34 +342,79 @@ class SubFrMetaLyrInfo(SubFrMeta):
     for widget in self.winfo_children():
       widget.destroy()
 
-    layerMeta = self.getLyrMetadata(lyr.identity)
+    self.lyrMeta = self.getLyrMetadata(lyr.identity)
 
-    if self.owner.type == "Meta":
-      layerMetaLink = Button(self, text="Full Metadata weblink (GeoNetwork ISO 19115)", padx=10, pady=2, background="snow3", anchor='e', bg=StyMan.qaClrPass, command=lambda:webbrowser.open_new(layerMeta['metadata']))#self.geonet(layerMeta))
-      layerMetaLink.grid(row=0, column=3, columnspan=4, sticky='e')
+    _frIdent = Frame(self, borderwidth=2, relief="raised", bg=StyMan.bgClrPass)
+    Label(_frIdent, text=lyr.identity, background=StyMan.bgClrPass, font='bold').grid(row=0, column=0, padx=10, pady=5)#, textvariable=self.lyrNameStr)
+    _frIdent.grid(row=0, column=0, columnspan=2, sticky='W')
+    # ttk.Label(self, text=lyr.identity, border=0).grid(row=0, column=0, padx=10)
+
+    if self.owner.type == "Meta": # all records here should have vicmap metadata from the APIs.
+      _frActions = Frame(self, borderwidth=2, bg=StyMan.bgClrData)
+      layerReseed = Button(_frActions, text="Reseed", padx=5, pady=2, background="snow3", bg=StyMan.qaClrPass, command=lambda:self.reseed(lyr.identity)) #anchor='e', 
+      layerReseed.grid(row=0, column=0, padx=(0.10), sticky='W')
+      layerMetaLink = Button(_frActions, text="Metadata weblink (GeoNetwork ISO 19115)", padx=5, pady=2, background="snow3", anchor='e', bg=StyMan.qaClrPass, command=lambda:webbrowser.open_new(self.lyrMeta['metadata']))#self.geonet(self.lyrMeta)) 
+      layerMetaLink.grid(row=0, column=1, padx=(10.0), sticky='E') #padx=(5.5), 
+      _frActions.grid(row=0, column=3, columnspan=4)#, sticky='EW')
     if self.owner.type == "Data":
       print(lyr)
-      _frUpload = self.mkFrUpload(lyr, layerMeta)
+      _frUpload = self.mkFrUpload(lyr)
       _frUpload.grid(row=0, column=3, columnspan=4, sticky='e')
     
-    if layerMeta:
+    if self.lyrMeta: # existing layer
       ## Table Columns
-      _colData = [(col,type) for col,type in layerMeta['columns'].items()] if layerMeta['columns'] else []
+      _colData = [(col,type) for col,type in self.lyrMeta['columns'].items()] if self.lyrMeta['columns'] else []
       _colcols = [('Column',120,'e'),('Type',120,'w')]
       _cols = TView(self, 'Columns', _colcols, 1, 0, _colData)
       ## Table Indexes
-      _idxData = [(idx[1],idx[0],idx[2]) for idx in layerMeta['indexes']] if layerMeta['indexes'] else []
+      _idxData = [(idx[1],idx[0],idx[2]) for idx in self.lyrMeta['indexes']] if self.lyrMeta['indexes'] else []
       _idxCols = [('Column',120,'w'),('idx_Name',120,'w'),('Type',50,'w')]
       _idxs = TView(self, 'Indexes', _idxCols, 1, 3, _idxData)
       ## Dump History Tree
-      _ldData = [(dump[2], dump[1], datetime.fromisoformat(dump[3]).strftime('%d/%m/%Y %H:%M'),dump[4],dump[5],dump[6]) for dump in layerMeta['pgDumps']] if layerMeta['pgDumps'] else []
+      _ldData = [(dump[2], dump[1], datetime.fromisoformat(dump[3]).strftime('%d/%m/%Y %H:%M'),dump[4],dump[5],dump[6]) for dump in self.lyrMeta['pgDumps']] if self.lyrMeta['pgDumps'] else []
       _ldData.sort(key = lambda x:datetime.strptime(x[2], "%d/%m/%Y %H:%M"), reverse=True)
       _ldCols = [('Supply Version',50,'w'),('Type',50,'w'),('Date',100,'w'),('Adds',80,'e'),('Dels',80,'e'),('Count',80,'e')]
       _loads = TView(self, 'Update History', _ldCols, 3, 0, _ldData, 7) #'Type':75,
-    else:
-      ttk.Label(self, text='New Dataset', border=3).grid(row=0, column=0, padx=10)
+    else: # new layer
+      self.mkNewUplFrm()
+      
+  def mkNewUplFrm(self):
+    Label(self, text='Upload New Dataset', border=3).grid(row=1, column=0, padx=10, sticky='EW')
+    # (self, fr, bgClr, var, name, val, wid, row, col, colspan=1, private=False):
+    # (self, self.bgClr, 'email', 'email', _valEmail, 60, 1, 0, 3)
 
-  def mkFrUpload(self, lyr, lyrMeta):
+    self.relation = StringVar()
+    _lbl = Label(self, text='Relation:', background = StyMan.bgClrData)
+    _lbl.grid(row=2, column=0, sticky="E")
+    # Label(self, text='datasets:').grid(row=1, column=4, sticky="E")
+    self.relBox = ttk.Combobox(self, values=['table','view'])
+    self.relBox.current(0)
+    self.relBox.grid(row=2, column=1, sticky="W")
+    # self.relBox.bind("<<ComboboxSelected>>", self.profileChanged)
+    # self.relBox.bind("<Return>",self.profileChanged)
+    
+    self.mdUUID = StringVar()
+    Label(self, text='GeoNetwork UUID:', background = StyMan.bgClrData).grid(row=3, column=0, sticky='E')
+    self.uuidEnt = Entry(self, textvariable=self.mdUUID, width=40, bd=3).grid(row=3, column=1, sticky='W')
+
+    self.geomtype = StringVar()
+    Label(self, text='Geometry Type:', background = StyMan.bgClrData).grid(row=4, column=0, sticky='E')
+    self.gtBox = ttk.Combobox(self, values=['polygon','multipolygon','linestring','multilinestring','point','multipoint','none'])
+    self.gtBox.current(0)
+    self.gtBox.grid(row=4, column=1, sticky="W")
+    
+    self.vdp = IntVar(value=0)
+    Label(self, text='VDP:', background = StyMan.bgClrData).grid(row=5, column=0, sticky='E')
+    self.vdpChk = Checkbutton(self, variable=self.vdp, onvalue=1, offvalue=0)
+    self.vdpChk.grid(row=5, column=1, sticky="W")
+
+    testBtn = Button(self, text="test", padx=5, pady=2, background="snow3", bg=StyMan.qaClrPass, command=lambda:self.testVars())
+    testBtn.grid(row=6, column=1, padx=5, pady=5)
+    
+  def testVars(self):
+    print(f"{self.mdUUID.get()} {self.relBox.get()} {self.gtBox.get()} {"true" if self.vdp.get() else "false"}")
+
+  def mkFrUpload(self, lyr):
     _fr = Frame(self, borderwidth=1, relief="raised", bg=StyMan.bgClrPass)
     ttk.Label(_fr, text='Upload', border=3).grid(row=0, column=0, padx=10)
     lyrUploadInc = Button(_fr, text="INC", padx=5, pady=2, background="snow3", bg=StyMan.qaClrPass, command=lambda:self.upload(lyr, Supplies.INC))
@@ -377,13 +423,13 @@ class SubFrMetaLyrInfo(SubFrMeta):
     lyrUploadDiff = Button(_fr, text="DIFF", padx=5, pady=2, background="snow3", bg=StyMan.qaClrPass, command=lambda:self.upload(lyr, Supplies.DIFF))
     lyrUploadDiff.grid(row=0, column=2, padx=5, pady=5)
     lyrUploadFull = Button(_fr, text="FULL", padx=5, pady=2, background="snow3", bg=StyMan.qaClrPass, command=lambda:self.upload(lyr, Supplies.FULL))
-    lyrUploadFull.grid(row=0, column=3, pady=5)
+    lyrUploadFull.grid(row=0, column=3, padx=5, pady=5)
     
-    if not lyrMeta: # new dataset, full upload only
-      lyrUploadInc.configure(fg='white', state="disabled", bg=StyMan.bgClrFail)#s
+    if not self.lyrMeta: # new dataset, full upload only
+      lyrUploadInc.configure(fg='white', state="disabled", bg=StyMan.bgClrFail)
       lyrUploadDiff.configure(fg='white', state="disabled", bg=StyMan.bgClrFail)
     if not self.guic.uploadAllowed(lyr):
-      lyrUploadInc.configure(fg='white', state="disabled", bg=StyMan.bgClrFail)#state="disabled", 
+      lyrUploadInc.configure(fg='white', state="disabled", bg=StyMan.bgClrFail)
       lyrUploadDiff.configure(fg='white', state="disabled", bg=StyMan.bgClrFail)
       lyrUploadFull.configure(fg='white', state="disabled", bg=StyMan.bgClrFail)
     return _fr
@@ -409,8 +455,24 @@ class SubFrMetaLyrInfo(SubFrMeta):
     elif upldType==Supplies.INC:
       print("INCREMENTAL supplies have not yet been implemented from the client")
     # do the upload ...
-    _dbExp = DB(self.guic.cfg)
-    Synccer(self.guic.cfg, _dbExp).upload(lyr.identity, upldType)
+    sync = Synccer(self.guic.cfg, DB(self.guic.cfg))
+    if self.lyrMeta: # existing dset
+      sync.upload(lyr.identity, upldType)
+    else:
+      _uuid = self.mdUUID.get()
+      _rel = self.relBox.get()
+      _gType = self.gtBox.get()
+      _vdp = "true" if self.vdp.get() else "false"
+      print(f"{_uuid} {_rel} {_gType} {_vdp}")
+      sync.upload(lyr.identity, upldType, relation=_rel, md_uuid=_uuid, geomType=_gType, vdp=_vdp)
+
+  def reseed(self, ident):
+    print(f"Reseeding {ident}")
+    _db = DB(self.guic.cfg)
+    _db.fixErrs(ident)
+    _db.close()
+    # Should we auto mark teh records as active and update the GUI ticklist?
+    # Should we kick off an immediate sync? (may get hung up on other unsyncced layers for awhile.)
 
 class TView(ttk.Treeview):
   def __init__(self, owner, name, colTupl, row, col, data, height=10):

@@ -97,7 +97,7 @@ class Synccer():
     PGClient(self.db, self.cfg.get('dbClientPath')).dump_file(lyrQual, fPath)
     return fPath
 
-  def upload(self, srcQual, supType, relation='table', md_uuid=None, geomType=None): # 3 optional parameters for initial uploads (creates). (Not strictly necessary).
+  def upload(self, srcQual, supType, relation=None, md_uuid=None, geomType=None, vdp=False): # 4 optional parameters for initial uploads (creates). (Not strictly necessary).
     # eg sync.upload('vmadd.address', Supplies.INC)
     logging.info(f"uploading {srcQual} to VLRS")
     # return # for safety during testing
@@ -115,12 +115,14 @@ class Synccer():
       PGClient(self.db, self.cfg.get('dbClientPath')).dump_file(tgtQual, fPath)
       
       #register the upload on VLRS and get an s3promise-link
-      data = {"dset":srcQual,"fname":fPath,"sup_type":supType, "relation":relation}
+      data = {"dset":srcQual,"fname":fPath,"sup_type":supType,"relation":relation}
+      if relation: data.update({"relation":relation}) 
       if md_uuid: data.update({"md_uuid":md_uuid})
-      if geomType: data.update({"geomType":geomType})
+      if geomType: data.update({"geom_type":geomType})
+      if vdp: data.update({"vdp":vdp})
 
       api = ApiUtils(self.cfg.get('baseUrl'), self.cfg.get('api_key'), self.cfg.get('client_id'))
-      result = api.post('upload', data)
+      result = api.post('upload', data) # throws exception if code!=200
       if s3promiseLink := result.get('uploadPromise'):
         api.put(s3promiseLink, fPath)
       else:

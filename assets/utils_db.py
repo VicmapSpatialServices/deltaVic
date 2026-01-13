@@ -1,7 +1,7 @@
 import os, sys, psycopg2, time, platform, logging
 from collections import OrderedDict
 from pathlib import Path
-from .utils import Config, FileUtils as FU
+from .utils import Config, FileUtils as FU, Supplies
 
 # class DBConn():
 #   def __init__(self, host, port, dbname, uname, pswd):
@@ -201,8 +201,11 @@ class DB():
     else:
       raise Exception("Could not get table stats for {}. Does it exist?".format(tblQual))
   
-  def fixErrs(self):
-    sqlStr = "update vm_meta.data set status='QUEUED', sup_ver=-1, err=false, extradata=jsonb(extradata)-'error' where err=true"
+  def fixErrs(self, ident=None):
+    if ident:
+      sqlStr = f"update vm_meta.data set status='QUEUED', sup_ver=-1 , sup_type='{Supplies.FULL}' where identity='{ident}'"
+    else:
+      sqlStr = "update vm_meta.data set status='QUEUED', sup_ver=-1, err=false, extradata=jsonb(extradata)-'error' where err=true"
     self.execute(sqlStr)
   
   def analVac(self, ident): # analyze and vaccuume
