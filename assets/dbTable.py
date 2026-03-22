@@ -156,7 +156,7 @@ class Schemas():#list
         if not self.cfg.get("regComplete") == "True": return
 
         api = ApiUtils(self.cfg.get('baseUrl'), self.cfg.get('api_key'), self.cfg.get('client_id'))
-        rsp = api.post("data", {})
+        rsp = api.post("data", {}) # get full list of permitted datasets
         _dsets = [LyrReg(d) for d in rsp['datasets']]
 
         # Merge in the existing table data for display and manipulation of active and status

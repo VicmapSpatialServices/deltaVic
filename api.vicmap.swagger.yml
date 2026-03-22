@@ -1,0 +1,298 @@
+openapi: 3.0.0
+info:
+  title: Vicmap Manager API
+  description: Allows acess to vicmap metadata
+  version: 0.1.0
+servers:
+  - url: https://0mgxefxoib.execute-api.ap-southeast-2.amazonaws.com/vmmgr/
+    description: Vicmap Load and Replication System API endpoint
+paths:
+  /register:
+    post:
+      summary: Register new user or obtain r/w rights.
+      description: creates and delivers a clientId
+      
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterBody'
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegResp'
+        '201': # NB: code not currently passing through gateway.
+          description: Created
+        '400':
+          description: The specified user ID is invalid (not a number).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrResp'
+        '403':
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrResp'
+        default:
+          description: Unexpected error
+
+  /verify:
+    get:
+      description: ''
+      parameters: []
+      responses:
+        '200':
+          description: OK - displays webpage at API endpoint with success/failure message.
+          # content: html/text: less said the better
+
+  /data:
+    post:
+      summary: Obtain full list of datasets wtih currency, or a single dataset with metadata and nextLoad
+      description: Endpoint for obtaining data assets and presigned download links
+      # parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DataBody'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataResp'
+        '400':
+          description: Not OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrResp'
+        '403':
+          description: Not Authorised
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrResp'
+        default:
+          description: Unexpected error
+        
+  /supply:
+    post:
+      summary: Get a full list of supplies, or detailed info for a single supply.
+      description: Interrogate supplies table in Vicmap Master.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SupBody'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupResp'
+        '400':
+          description: Not OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrResp'
+        '403':
+          description: Not Authorised
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrResp'
+
+components:
+  schemas:
+    RegisterBody:
+      title: regReqBody
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+          example: person@example.com
+          description: The user's email address.
+        client_id:
+          type: string
+          example: d09d743a-dc04-47db-b147-f251b3c28b4b
+          description: Unique identifier for the client application.
+        api_key:
+          type: string
+          example: iLoevVicmapVectorData
+          description: The API key assigned to the client.
+      required:  
+        - email
+    RegResp:
+      title: regRespBody
+      type: object
+      properties:
+        client_id:
+          type: string
+          example: d09d743a-dc04-47db-b147-f251b3c28b4b
+          description: Unique identifier for the client application.
+        api_key:
+          type: string
+          example: iLoevVicmapVectorData
+          description: The API key assigned to the client.
+        rights:
+          type: object
+          example: "{datasets: {{allow:{read:[],write:[]},deny:{read:[],write:[]}}},schemas: {{allow:{read:[],write:[]},deny:{read:[],write:[]}}}}"
+          description: the rights assigned to the user for download and upload 
+      required:
+        - client_id
+        
+    DataBody:
+      title: dataReqBody
+      type: object
+      required: [client_id, api_key]
+      properties:
+        client_id:
+          type: string
+          example: <UUID>
+          description: Unique identifier for the client application.
+        api_key:
+          type: string
+          example: iLoevVicmapVectorData
+          description: The API key assigned to the client.
+        dset:
+          type: string
+          example: vmreftab.md_reftab_relationship
+          description: The identity of the datasets you want to query
+        sup_ver:
+          type: integer
+          example: -1
+          description: the current version you have in your local repository.<br>
+            If sup_ver is provided, an s3 presigned link will be generated.<br>
+            If sup_ver=-1, server provides a seed link for a full table replace.<br>
+            The server will determine the next loadId and provide a link, (if nextLoad is available).<br>
+    DataResp:
+      title: dataRespBody
+      type: object
+      properties:
+        datasets:
+          type: object
+          example: list of object dicts containing [identity, sup, sup_ver, sup_date, geom_type, relation, pkey]
+          description: if no dset is passed in the request, the API will detail all datasets for your api_key.<br>
+        identity:
+          type: string
+          example: vmreftab.md_reftab_relationship
+          description: The identity of the datasets you want to query
+        sup:
+          type: string
+          example: MISC
+          description: The supply family in [VLAT, VTT, MISC]
+        sup_ver:
+          type: string
+          example: 148
+          description: The current max(supply version) in vicmap_master
+        supType:
+          type: string
+          example: inc
+          description: The latest supply type in [full, inc]
+        supDate:
+          type: string
+          example: ISO-8601 2025-11-21T03:53:26.518037
+          description: The latest supply date
+        pKey:
+          type: string
+          example: ufi
+          description: The primary key for this table
+        indexes:
+          type: object
+          example: list of lists
+          description: A list of indexes applied to this table.<br>
+            Index structure is [indexName, indexColumn, inexType]<br>
+            .. where indexType is in [PrimaryKey, Unique, NonUnique, SpatialDomain]
+        pgDumps:
+          type: object
+          example: list of lists
+          description: A list of PostGis dumps prepared for each supply version for this table.<br>
+            pgDump structure is [instanceType, supType, supVer, SupDate, addCount, deleteCount, rowCount]
+        columns:
+          type: object
+          example: ordered dict of cols
+          description: Key:Value of column name:dataType in table attribute order
+        metadata:
+          type: string
+          example: https://metashare.maps.vic.gov.au/geonetwork/search#/metadata/4c6f1722-2a36-570a-ab66-22477f98dead
+          description: Link to metadata storage in DEECAs MetaShare GeoNetwork (ISO-19115), which is connected to DEECAs DataShare ClipZipShip delivery platform..
+        next:
+          type: object
+          example: dict of parameters for next applicable load for this layer
+          description: dict contains [filename, supVer, supType, supDate, rowCount, checkSum, s3Link]
+
+    SupBody:
+      title: supReqBody
+      type: object
+      required: [client_id, api_key]
+      properties:
+        client_id:
+          type: string
+          example: <UUID>
+          description: Unique identifier for the client application.
+        api_key:
+          type: string
+          example: iLoevVicmapVectorData
+          description: The API key assigned to the client.
+        supply:
+          type: string
+          example: VTT705
+          description: Concatenated supply type (VLAT/VTT/MISC) with supply version. Provides extended info in reponse.
+    SupResp:
+      title: supResp
+      type: object
+      properties:
+        supplies:
+          type: object
+          example: a list of dicts
+          description: supply dict consists of [sup, sup_ver, sup_type, status, to_date]
+        sup:
+          type: string
+          example: VLAT | VTT | MISC
+          description: THe Load family represented.
+        sup_ver:
+          type: integer
+          example: 432
+          description: The supply Id of this load. Each component load (VLAT/VTT/MISC) hafolows it's own sequence.
+        sup_date:
+          type: string
+          example: ISO-8601 2025-11-21T03:53:26.518037
+          description: The datestamp that came from the loads metaadata, (or was generated at load commence).
+        status:
+          type: string
+          example: OPN | LOADING | COMPLETED
+          description: current status of this load
+        to_date:
+          type: string
+          example: ISO-8601 2025-11-21T03:53:26.518037
+          description: The ingestion time, representing the latest date the composing data can be.
+        extradata:
+          type: object
+          example: nested dicts and lists
+          description: Shows extra info about the load such as supply metadata and loading times.
+
+    ErrResp:
+      title: issue notification for non-status-id=200
+      type: object
+      properties:
+        warning:
+          type: string
+          example: dset vmreftab.md_reftab_relationship supply version 3 does not exist for this dataset
+          description: Something is amiss and needs to be noted by the operator
+        error:
+          type: string
+          example: Not Authorised + str(ex)
+          description: Something went wrong and needs to be noted by the operator

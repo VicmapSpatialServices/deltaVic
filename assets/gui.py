@@ -146,6 +146,7 @@ class FrMetaData(ttk.Frame):
 
   def setData(self):
     data = Schemas(self.type, self.guic.cfg)
+    print([sch.name for sch in data.schs])
     self.schFr.setData(data)
     self.lyrFr.setData(data)
     print(len(data.schs))
@@ -471,7 +472,6 @@ class SubFrMetaLyrInfo(SubFrMeta):
     _db = DB(self.guic.cfg)
     _db.fixErrs(ident)
     _db.close()
-    # Should we auto mark teh records as active and update the GUI ticklist?
     # Should we kick off an immediate sync? (may get hung up on other unsyncced layers for awhile.)
 
 class TView(ttk.Treeview):
@@ -639,6 +639,7 @@ class SubFrReg(SubFr):
 
     self.refresh()
     self.guic.frSetup.ctrlFrm.refresh()
+    # self.guic.frMeta.setData()
     # self.regMsg.config(text=qaMsg)
   
   def refresh(self):
