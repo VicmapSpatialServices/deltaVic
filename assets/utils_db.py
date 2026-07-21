@@ -164,7 +164,8 @@ class DB():
   
   def getSchemas(self):
     sqlStr = "select schema_name from information_schema.schemata" + \
-      " where schema_name not in ('public','tiger','information_schema','pg_catalog')" + \
+      " where schema_name not in ('public','tiger','information_schema')" + \
+      " and schema_name not like 'pg_%'" + \
       " order by schema_name asc"
     schemas = self.rows(sqlStr)
     return [sch[0] for sch in schemas] if schemas else []

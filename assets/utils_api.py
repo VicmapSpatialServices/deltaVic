@@ -18,7 +18,7 @@ class ApiUtils():
     data.update({"client_id":self.client_id,"api_key":self.api_key})
     logging.debug(f" -> Submitting POST api call to /{endp} ... data: {data}")
     response = requests.post(f"{self.url}/{endp}", json=data, headers=self.headers)#, auth=self.auth) # , files=files
-    if response.status_code != 200:
+    if response.status_code not in (200,201,202):
       raise Exception(f"The {endp} endpoint was not successful. ErrCode={response.status_code} ErrMsg={response.text} data={data}")
     return response.json()
 
@@ -28,7 +28,7 @@ class ApiUtils():
     
     logging.info(response.status_code)#, response.text)
     if response.status_code != 200:
-      raise Exception(f"Upload to presigned-url did not succeeed. code:{response.status_code} msg:{response.text}")
+      raise Exception(f"Upload to presigned-url did not succeed. code:{response.status_code} msg:{response.text}")
     logging.info(f"Completed upload of {fPath} to {s3_url[0:100]}...")
     
   def getData(self):

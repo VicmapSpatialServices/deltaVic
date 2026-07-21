@@ -120,7 +120,7 @@ class Config():
   def initDefaults(self, stg):
     # self.cp.add_section('default')
     self.cp[stg] = {'name':'deltaVic',
-      'baseUrl':'https://0mgxefxoib.execute-api.ap-southeast-2.amazonaws.com/vmmgr/',
+      'baseUrl':'https://c6w2u7gu3d.execute-api.ap-southeast-2.amazonaws.com/vmapi/',
       'log_level':20,
       'sync_all':False,
       'regComplete': False,

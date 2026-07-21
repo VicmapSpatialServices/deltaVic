@@ -103,40 +103,54 @@ class Synccer():
     # return # for safety during testing
 
     try:
-      sch, tbl = srcQual.split('.')
-      tgtQual = f'miscsupply.{tbl}'
-      # # export the file
-      fPath = f"temp/{srcQual}.dmp"
-      
+      lyr = SyncLyr([srcQual,relation,supType,None,md_uuid,geomType, vdp])
+      if upInf := self.stageUpload(lyr):
+        # fPath, tgtQual = upInf
+        return self.pushToVLRS(lyr)#.ident, lyr.fPath, lyr.supType, relation, md_uuid, _geomType, _vdp, dshLyr.tgtQual)
+        # return self.pushToVLRS(srcQual, fPath, supType, relation, md_uuid, geomType, vdp, tgtQual) # f"Successfully uploaded {fPath}"?
+    except Exception as ex:
+      errStr = f"Failed to upload {srcQual}: {str(ex)}"
+      logging.error(errStr)
+    return False # 
+
+  def stageUpload(self, dshLyr):
+    logging.info(f"Staging upload for {dshLyr.ident}")
+    try:
       # copy layer to miscsupply schema then dump it. Should include indexes.
-      self.db.copyTable(srcQual, tgtQual)
-      # dump from miscsupply schema.
-      logging.debug(f"{tgtQual}, {fPath}")
-      PGClient(self.db, self.cfg.get('dbClientPath')).dump_file(tgtQual, fPath)
-      
-      #register the upload on VLRS and get an s3promise-link
-      data = {"dset":srcQual,"fname":fPath,"sup_type":supType,"relation":relation}
-      if relation: data.update({"relation":relation}) 
-      if md_uuid: data.update({"md_uuid":md_uuid})
-      if geomType: data.update({"geom_type":geomType})
-      if vdp: data.update({"vdp":vdp})
+      self.db.copyTable(dshLyr.ident, dshLyr.tgtQual) # copy layer to miscsupply schema then dump it. Should include indexes.
+      logging.debug(f"{dshLyr.tgtQual}, {dshLyr.fPath}") # dump from miscsupply schema.
+      PGClient(self.db, self.cfg.get('dbClientPath')).dump_file(dshLyr.tgtQual, dshLyr.fPath) # export the file
+      return True
+    except Exception as ex:
+      logging.error(str(ex))
+      return False
+  
+  def pushToVLRS(self, lyr):
+    logging.info(f"Pushing upload to VLRS: {lyr.ident}")
+    #register the upload on VLRS and get an s3promise-link
+    try:
+      data = {"dset":lyr.ident,"fname":lyr.fPath,"sup_type":lyr.supType, "relation":lyr.relation}
+      if lyr.geomType: data.update({"geom_type":lyr.geomType}) # required for new dataset only
+      if lyr.md_uuid: data.update({"md_uuid":lyr.md_uuid}) # required for new datasets only if it propogates to VDP
+      if lyr.relation: data.update({"relation":lyr.relation}) 
+      if lyr.vdp: data.update({"vdp":lyr.vdp})
 
       api = ApiUtils(self.cfg.get('baseUrl'), self.cfg.get('api_key'), self.cfg.get('client_id'))
       result = api.post('upload', data) # throws exception if code!=200
       if s3promiseLink := result.get('uploadPromise'):
-        api.put(s3promiseLink, fPath)
+        api.put(s3promiseLink, lyr.fPath)
       else:
         raise Exception(f"S3 put_object failed")
       
       # remove the migration artifacts
-      self.db.dropTable(tgtQual)
-      FU.remove(fPath) # clean up the dumpfile
+      self.db.dropTable(lyr.tgtQual)
+      FU.remove(lyr.fPath) # clean up the dumpfile
       
       return True # f"Successfully uploaded {fPath}"
     
     except Exception as ex:
       logging.info(traceback.format_exc())
-      errStr = f"Failed to upload {fPath}: {str(ex)}"
+      errStr = f"Failed to upload {lyr.fPath}: {str(ex)}"
       logging.error(errStr)
       return False # 
 
@@ -274,8 +288,8 @@ class Sync():
   def clean(self):
     # clean up the temp file and the temp view
     logging.debug(F" -> clean-ing {self.lyr.identity}")
-    if self.lyr.sup_type == Supplies.INC:
-      self.db.dropTable(self.lyr.extradata['filename'].replace('.dmp',''))
+    # if self.lyr.sup_type == Supplies.INC:
+    #   self.db.dropTable(self.lyr.extradata['filename'].replace('.dmp',''))
     FU.remove(f"{self.DATAPATH}/{self.lyr.extradata['filename']}")
     # status->COMPLETE or err=true
     self.db.execute(*self.lyr.upStatusSql(LyrReg.COMPLETE))
@@ -292,3 +306,11 @@ class Sync():
     _tms = lyr.extradata[tms] if tms in lyr.extradata else {}
     _tms.update({status:duration}) # overwrite
     self.db.execute(*lyr.upExtraSql({tms:_tms}))
+
+class SyncLyr():
+  cols = ['ident','relation','supType','pubDate','md_uuid','geomType','vdp'] # 6 items, in range below
+  def __init__(self, row):
+    [setattr(self, self.cols[ii], row[ii]) for ii in range(len(self.cols))]
+    
+    self.fPath = f"temp/{self.ident}.dmp"
+    self.tgtQual = f'miscsupply.{self.ident.split('.')[1]}'

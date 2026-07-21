@@ -1,5 +1,5 @@
 from .setup import Setup
-from .sync import Synccer
+from .sync import Synccer, SyncLyr
 from .gui import GuiControl
 
 from .utils_api import ApiUtils
