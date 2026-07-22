@@ -1,17 +1,20 @@
 openapi: 3.0.0
 info:
   title: Vicmap Manager API
-  description: Allows acess to vicmap metadata
-  version: 0.1.0
+  description: Allows access to vicmap metadata, replication dumps and self-serve file downloads
+  version: 0.2.0
 servers:
-  - url: https://0mgxefxoib.execute-api.ap-southeast-2.amazonaws.com/vmmgr/
-    description: Vicmap Load and Replication System API endpoint
+  - url: https://c6w2u7gu3d.execute-api.ap-southeast-2.amazonaws.com/vmapi/
+    description: Vicmap Load and Replication System API endpoint (production)
 paths:
   /register:
     post:
       summary: Register new user or obtain r/w rights.
-      description: creates and delivers a clientId
-      
+      description: A bare email registers a new client and emails a verification link.<br>
+        With a client_id it returns the rights for the supplied api_key (and changes the
+        registered email if a different one is supplied, re-triggering verification).<br>
+        If api_key is omitted it defaults to the OpenData group.<br>
+        Rate limited per source IP.
       requestBody:
         required: true
         content:
@@ -19,43 +22,125 @@ paths:
             schema:
               $ref: '#/components/schemas/RegisterBody'
       responses:
-        '200':
-          description: successful
+        '201':
+          description: Created / OK. New registrations return client_id only (api_key and
+            rights follow once the email is verified); existing clients get client_id,
+            api_key and rights.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/RegResp'
-        '201': # NB: code not currently passing through gateway.
-          description: Created
         '400':
-          description: The specified user ID is invalid (not a number).
+          description: Bad email, unknown api_key, or email already registered.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrResp'
         '403':
-          description: Forbidden.
+          description: Not Authorised (unknown client_id).
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrResp'
+        '429':
+          $ref: '#/components/responses/RateLimited'
         default:
           description: Unexpected error
 
   /verify:
     get:
-      description: ''
-      parameters: []
+      summary: Verify an email address from the emailed single-use link.
+      description: Consumes the single-use, time-limited token minted by /register or
+        /download and activates the client. Always renders an HTML result page (success
+        or failure message). Rate limited per source IP.
+      parameters:
+        - name: key
+          in: query
+          required: true
+          schema:
+            type: string
+          description: The single-use verification token from the email. Duplicate key
+            parameters are rejected.
       responses:
         '200':
-          description: OK - displays webpage at API endpoint with success/failure message.
-          # content: html/text: less said the better
+          description: OK - HTML result page with a success/failure message and a
+            "Return to Downloads" button.
+          content:
+            text/html: {}
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /download:
+    get:
+      summary: The self-serve download portal page.
+      description: Serves a self-contained HTML page (email + API key form) that drives
+        POST /download for discovery and presigning.
+      responses:
+        '200':
+          description: OK - HTML download portal page.
+          content:
+            text/html: {}
+    post:
+      summary: Discover downloadable datasets, or presign download links for one dataset.
+      description: Self-serve file download. email is the identity (and first-time
+        verification gate), api_key carries the group rights and portal branding.<br>
+        Without dset - discovery - lists the datasets this key can read that have
+        published files, with the formats available for each.<br>
+        With dset, returns time-limited presigned S3 links for that dataset's files.
+        Datasets flagged per_lga additionally require an lga_code (council) and deliver
+        one zip per council. Rate limited per source IP.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DownloadBody'
+      responses:
+        '200':
+          description: OK - discovery listing (no dset) or presigned links (dset supplied).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/DownloadDiscoveryResp'
+                  - $ref: '#/components/schemas/DownloadPresignResp'
+        '202':
+          description: Email is new or not yet verified - a verification link has been
+            sent (if eligible). Verify then request the download again.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MsgResp'
+        '400':
+          description: Bad email shape, bad dataset name, or missing/invalid lga_code for
+            a per-council dataset.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrResp'
+        '403':
+          description: Not Authorised (unknown api_key, or no READ rights on a restricted
+            dataset).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrResp'
+        '404':
+          description: No download files are currently available for the dataset.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrResp'
+        '429':
+          $ref: '#/components/responses/RateLimited'
 
   /data:
     post:
-      summary: Obtain full list of datasets wtih currency, or a single dataset with metadata and nextLoad
-      description: Endpoint for obtaining data assets and presigned download links
-      # parameters: []
+      summary: Obtain full list of datasets with currency, or a single dataset with metadata and next load
+      description: Endpoint for obtaining data assets and presigned replication-dump links.
+        Requires client_id (verified email) and api_key. Rate limited per client_id.<br>
+        Note - "not ready yet" conditions (dump still processing, full dump lagging the
+        latest supply) return 200 with a warning body rather than an error status.
       requestBody:
         required: true
         content:
@@ -64,30 +149,35 @@ paths:
               $ref: '#/components/schemas/DataBody'
       responses:
         '200':
-          description: OK
+          description: OK - dataset list, single-dataset detail (optionally with "next"
+            load link), or a warning body when the requested dump is not ready yet.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/DataResp'
         '400':
-          description: Not OK
+          description: Bad dataset name, dataset does not exist, no READ rights for this
+            api_key (warning body), or unknown sup_ver.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrResp'
         '403':
-          description: Not Authorised
+          description: Not Authorised (unknown client_id or api_key).
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrResp'
+        '429':
+          $ref: '#/components/responses/RateLimited'
         default:
           description: Unexpected error
-        
+
   /supply:
     post:
       summary: Get a full list of supplies, or detailed info for a single supply.
-      description: Interrogate supplies table in Vicmap Master.
+      description: Interrogate the supplies table in Vicmap Master. Requires client_id and
+        api_key. Rate limited per client_id.
       requestBody:
         required: true
         content:
@@ -102,39 +192,90 @@ paths:
               schema:
                 $ref: '#/components/schemas/SupResp'
         '400':
-          description: Not OK
+          description: Supply not found.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrResp'
         '403':
-          description: Not Authorised
+          description: Not Authorised (unknown client_id or api_key).
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrResp'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /upload:
+    post:
+      summary: Register an upload of a MISC dataset and obtain a presigned PUT link.
+      description: Write-gated (the api_key group needs WRITE rights on the dataset;
+        MISC supply family only). Creates the dataset registration for first-time
+        uploads, queues the supply instance, and returns a presigned S3 PUT link that
+        the client then uploads the pg_dump file to. Rate limited per client_id.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadBody'
+      responses:
+        '200':
+          description: OK - upload registered and presigned PUT link issued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadResp'
+        '400':
+          description: Bad dataset name, no WRITE rights (warning body), bad sup_type,
+            dataset not enabled for VRS upload (non-MISC), or dataset creation failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrResp'
+        '403':
+          description: Not Authorised (unknown client_id or api_key).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrResp'
+        '429':
+          $ref: '#/components/responses/RateLimited'
 
 components:
+  responses:
+    RateLimited:
+      description: Rate limit exceeded - retry later. Register/verify/download throttle
+        per source IP; data/supply/upload throttle per client_id.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrResp'
+
   schemas:
     RegisterBody:
       title: regReqBody
       type: object
+      description: Either email alone (new registration) or client_id (optionally with a
+        new email and/or api_key to evaluate rights) must be supplied — email is not
+        required when client_id is present.
       properties:
         email:
           type: string
           format: email
           example: person@example.com
-          description: The user's email address.
+          description: The user's email address. Registers a new client (or changes the
+            email of an existing client_id); triggers a verification email.
         client_id:
           type: string
           example: d09d743a-dc04-47db-b147-f251b3c28b4b
-          description: Unique identifier for the client application.
+          description: Unique identifier for an existing client. Supply to retrieve the
+            rights for an api_key.
         api_key:
           type: string
           example: iLoevVicmapVectorData
-          description: The API key assigned to the client.
-      required:  
-        - email
+          description: The API key (group) to evaluate rights against. Defaults to the
+            OpenData group when omitted.
     RegResp:
       title: regRespBody
       type: object
@@ -146,14 +287,94 @@ components:
         api_key:
           type: string
           example: iLoevVicmapVectorData
-          description: The API key assigned to the client.
+          description: The API key echoed back (existing-client requests only).
         rights:
           type: object
-          example: "{datasets: {{allow:{read:[],write:[]},deny:{read:[],write:[]}}},schemas: {{allow:{read:[],write:[]},deny:{read:[],write:[]}}}}"
-          description: the rights assigned to the user for download and upload 
+          example: "{datasets: {allow:{read:[],write:[]},deny:{read:[],write:[]}}, schemas: {allow:{read:[],write:[]},deny:{read:[],write:[]}}}"
+          description: The rights assigned to the api_key's group for download and upload
+            (existing-client requests only).
       required:
         - client_id
-        
+
+    DownloadBody:
+      title: downloadReqBody
+      type: object
+      required: [email, api_key]
+      properties:
+        email:
+          type: string
+          format: email
+          example: person@example.com
+          description: The requester's email. Unverified/first-time emails receive a
+            verification link (response 202) instead of downloads.
+        api_key:
+          type: string
+          example: iLoevVicmapVectorData
+          description: The API key carrying the group's read rights and portal branding.
+        dset:
+          type: string
+          example: vmtrans.tr_road_gov
+          description: Dataset identity to presign. Omit for discovery mode.
+        lga_code:
+          type: string
+          example: "304"
+          description: Council code, required for (and only valid with) datasets flagged
+            per_lga in discovery. Must be on the server-side LGA whitelist.
+    DownloadDiscoveryResp:
+      title: downloadDiscoveryResp
+      type: object
+      properties:
+        datasets:
+          type: array
+          description: The datasets this api_key can read that have published files.
+            per_lga datasets deliver one file per council and require lga_code on presign.
+          items:
+            type: object
+            properties:
+              dataset:
+                type: string
+                example: vmtrans.tr_road_gov
+              formats:
+                type: array
+                items:
+                  type: string
+                example: ["FGDB", "MapInfo TAB"]
+              per_lga:
+                type: boolean
+                example: false
+        portal:
+          type: object
+          nullable: true
+          example: {"title": "Road Management and Declarations", "subtitle": "Time-limited downloads for authorised data partners"}
+          description: Optional per-group page branding (title/subtitle), from the group
+            registry. Null when the group has none (the page shows a neutral default).
+    DownloadPresignResp:
+      title: downloadPresignResp
+      type: object
+      properties:
+        dataset:
+          type: string
+          example: vmtrans.tr_road_gov
+        downloads:
+          type: array
+          description: One entry per format found in the bucket.
+          items:
+            type: object
+            properties:
+              format:
+                type: string
+                example: FGDB
+              filename:
+                type: string
+                example: vmtrans.tr_road_gov_fgdb_20260722.zip
+              url:
+                type: string
+                description: Time-limited presigned S3 GET link.
+              expires_in:
+                type: integer
+                example: 3600
+                description: Link lifetime in seconds.
+
     DataBody:
       title: dataReqBody
       type: object
@@ -170,11 +391,11 @@ components:
         dset:
           type: string
           example: vmreftab.md_reftab_relationship
-          description: The identity of the datasets you want to query
+          description: The identity of the dataset you want to query.
         sup_ver:
           type: integer
           example: -1
-          description: the current version you have in your local repository.<br>
+          description: The current version you have in your local repository.<br>
             If sup_ver is provided, an s3 presigned link will be generated.<br>
             If sup_ver=-1, server provides a seed link for a full table replace.<br>
             The server will determine the next loadId and provide a link, (if nextLoad is available).<br>
@@ -183,13 +404,18 @@ components:
       type: object
       properties:
         datasets:
-          type: object
+          type: array
+          items:
+            type: object
           example: list of object dicts containing [identity, sup, sup_ver, sup_date, geom_type, relation, pkey]
-          description: if no dset is passed in the request, the API will detail all datasets for your api_key.<br>
+          description: If no dset is passed in the request, the API will detail all
+            datasets visible to your api_key (unrestricted datasets, plus restricted ones
+            your group is allowed to read). sup_ver/sup_date are null for datasets not
+            yet published to VMOPS.
         identity:
           type: string
           example: vmreftab.md_reftab_relationship
-          description: The identity of the datasets you want to query
+          description: The identity of the dataset you queried.
         sup:
           type: string
           example: MISC
@@ -202,22 +428,26 @@ components:
           type: string
           example: inc
           description: The latest supply type in [full, inc]
-        supDate:
+        sup_date:
           type: string
           example: ISO-8601 2025-11-21T03:53:26.518037
           description: The latest supply date
-        pKey:
+        pkey:
           type: string
           example: ufi
           description: The primary key for this table
         indexes:
-          type: object
+          type: array
+          items:
+            type: array
           example: list of lists
           description: A list of indexes applied to this table.<br>
-            Index structure is [indexName, indexColumn, inexType]<br>
+            Index structure is [indexName, indexColumn, indexType]<br>
             .. where indexType is in [PrimaryKey, Unique, NonUnique, SpatialDomain]
         pgDumps:
-          type: object
+          type: array
+          items:
+            type: array
           example: list of lists
           description: A list of PostGis dumps prepared for each supply version for this table.<br>
             pgDump structure is [instanceType, supType, supVer, SupDate, addCount, deleteCount, rowCount]
@@ -228,11 +458,19 @@ components:
         metadata:
           type: string
           example: https://metashare.maps.vic.gov.au/geonetwork/search#/metadata/4c6f1722-2a36-570a-ab66-22477f98dead
-          description: Link to metadata storage in DEECAs MetaShare GeoNetwork (ISO-19115), which is connected to DEECAs DataShare ClipZipShip delivery platform..
+          description: Link to metadata storage in DEECAs MetaShare GeoNetwork (ISO-19115),
+            which is connected to DEECAs DataShare ClipZipShip delivery platform.
         next:
           type: object
           example: dict of parameters for next applicable load for this layer
-          description: dict contains [filename, supVer, supType, supDate, rowCount, checkSum, s3Link]
+          description: dict contains [filename, sup_ver, sup_type, sup_date, row_count,
+            check_sum, s3_url], plus [adds, dels] when sup_type is inc. Only present
+            when sup_ver was supplied and a newer dump is ready.
+        warning:
+          type: string
+          example: dset vmtrans.tr_road is currently processing. Try again soon.
+          description: Returned (with status 200) when the requested dump exists but is
+            not ready to hand out yet - retry later.
 
     SupBody:
       title: supReqBody
@@ -250,27 +488,29 @@ components:
         supply:
           type: string
           example: VTT705
-          description: Concatenated supply type (VLAT/VTT/MISC) with supply version. Provides extended info in reponse.
+          description: Concatenated supply type (VLAT/VTT/MISC) with supply version. Provides extended info in response.
     SupResp:
       title: supResp
       type: object
       properties:
         supplies:
-          type: object
+          type: array
+          items:
+            type: object
           example: a list of dicts
           description: supply dict consists of [sup, sup_ver, sup_type, status, to_date]
         sup:
           type: string
           example: VLAT | VTT | MISC
-          description: THe Load family represented.
+          description: The Load family represented.
         sup_ver:
           type: integer
           example: 432
-          description: The supply Id of this load. Each component load (VLAT/VTT/MISC) hafolows it's own sequence.
-        sup_date:
+          description: The supply Id of this load. Each component load (VLAT/VTT/MISC) follows its own sequence.
+        sup_type:
           type: string
-          example: ISO-8601 2025-11-21T03:53:26.518037
-          description: The datestamp that came from the loads metaadata, (or was generated at load commence).
+          example: full | inc
+          description: The supply type of this load.
         status:
           type: string
           example: OPN | LOADING | COMPLETED
@@ -282,10 +522,67 @@ components:
         extradata:
           type: object
           example: nested dicts and lists
-          description: Shows extra info about the load such as supply metadata and loading times.
+          description: Shows extra info about the load such as supply metadata and loading
+            times (single-supply requests only).
+
+    UploadBody:
+      title: uploadReqBody
+      type: object
+      required: [client_id, api_key, dset, sup_type]
+      properties:
+        client_id:
+          type: string
+          example: <UUID>
+          description: Unique identifier for the client application.
+        api_key:
+          type: string
+          example: iLoevVicmapVectorData
+          description: The API key. Its group must hold WRITE rights on the dataset.
+        dset:
+          type: string
+          example: eisedit.my_misc_dataset
+          description: The identity of the dataset being uploaded (MISC family only).
+        sup_type:
+          type: string
+          example: full
+          description: The supply type of the upload in [full, diff, inc].
+        relation:
+          type: string
+          example: table
+          description: table or view. First-time (dataset-creating) uploads only.
+        geom_type:
+          type: string
+          example: multipolygon
+          description: Geometry type in [polygon, multipolygon, linestring,
+            multilinestring, point, multipoint, none]. First-time uploads only.
+        md_uuid:
+          type: string
+          example: 4c6f1722-2a36-570a-ab66-22477f98dead
+          description: GeoNetwork metadata UUID. First-time uploads only.
+        vdp:
+          type: boolean
+          example: false
+          description: Route the load to the formal Vicmap Data Product publish pipeline.
+            First-time uploads only.
+    UploadResp:
+      title: uploadResp
+      type: object
+      properties:
+        uploadPromise:
+          type: string
+          description: Time-limited presigned S3 PUT link. Upload the pg_dump (custom
+            format) file to this URL to complete the supply.
+
+    MsgResp:
+      title: informational message
+      type: object
+      properties:
+        message:
+          type: string
+          example: If this email is eligible, a verification link has been sent. Verify your email, then request the download again.
 
     ErrResp:
-      title: issue notification for non-status-id=200
+      title: issue notification for non-2xx statuses
       type: object
       properties:
         warning:
