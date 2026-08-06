@@ -519,11 +519,6 @@ components:
           type: string
           example: ISO-8601 2025-11-21T03:53:26.518037
           description: The ingestion time, representing the latest date the composing data can be.
-        extradata:
-          type: object
-          example: nested dicts and lists
-          description: Shows extra info about the load such as supply metadata and loading
-            times (single-supply requests only).
 
     UploadBody:
       title: uploadReqBody
@@ -540,7 +535,7 @@ components:
           description: The API key. Its group must hold WRITE rights on the dataset.
         dset:
           type: string
-          example: eisedit.my_misc_dataset
+          example: vmadmin.my_misc_dataset
           description: The identity of the dataset being uploaded (MISC family only).
         sup_type:
           type: string
