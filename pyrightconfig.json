@@ -1,0 +1,19 @@
+// Type checking for the editor and the command line, from one file. Run pyright.
+
+// Pylance does not read this for its interpreter or its formatter settings, which stay
+// in .vscode/settings.json, but it does honour the analysis settings here.
+
+{
+  // The package is imported as assets from the repository root, which is also where
+  // deltaVic.py runs from.
+  "include": ["assets", "deltaVic.py"],
+  "exclude": ["**/__pycache__", ".venv", "temp"],
+
+  // The image is python:3.14-slim, and tkinter and psycopg2 both resolve out of the
+  // virtual environment rather than the system python.
+  "venvPath": ".",
+  "venv": ".venv",
+  "pythonVersion": "3.14",
+
+  "typeCheckingMode": "strict"
+}

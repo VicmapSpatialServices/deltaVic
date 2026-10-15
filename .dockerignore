@@ -1,1 +1,23 @@
+# local configuration. the container is configured through its own config.ini
 config.ini
+
+# nothing here belongs in the image, and the virtual environment is another platform's
+.venv/
+venv/
+env/
+.git/
+.ruff_cache/
+__pycache__
+*.py[cod]
+
+# working files from a local run
+temp*
+*.dmp
+*.log
+*.pgpgpass
+
+# editor and operating system leftovers
+.vscode/
+deltaVic.code-workspace
+.idea/
+.DS_Store

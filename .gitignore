@@ -1,5 +1,28 @@
-temp*
+# python
 __pycache__
-deltaVic.code-workspace
-deltaVic.log
+*.py[cod]
+
+# virtual environments and tool caches. venv and ruff each write a gitignore of their
+# own inside these, but only on recent versions and only under these names.
+.venv/
+venv/
+env/
+.ruff_cache/
+
+# working files. temp holds the dumps a sync downloads
+temp*
+*.dmp
+*.log
+
+# local configuration. holds the api key and the database password
 config.ini
+
+# cleartext credential file, written beside the dumps while pg_dump or pg_restore runs
+*.pgpgpass
+
+# editor and operating system leftovers
+deltaVic.code-workspace
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

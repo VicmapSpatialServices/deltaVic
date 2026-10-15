@@ -1,4 +1,4 @@
-FROM python:3.13-slim
+FROM python:3.14-slim
 
 # Install dependencies
 RUN apt update -y \
@@ -16,10 +16,10 @@ RUN sh -c 'echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql
     https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > \
     /etc/apt/sources.list.d/pgdg.list'
 
-# Install the PostgreSQL 17 client
+# Install the PostgreSQL 18 client
 RUN apt update -y \
     && apt install -y \
-    postgresql-client-17
+    postgresql-client-18
 
 # Copy the deltaVic repository
 COPY . /deltaVic

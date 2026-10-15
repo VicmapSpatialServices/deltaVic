@@ -1,5 +1,5 @@
 # ATTENTION:
-please report any security flaws to vicmap@transport.vic.gov.au
+please report any security flaws to vicmap.help@transport.vic.gov.au
 These may include
 -any authentication bypass behaviours of the Vicmap Manager API endpoints in use, (eg: usage without an active client-id, aside from registration).
 -any restricted datasets that can be accessed by the default Open Data API key provided by the registration process.

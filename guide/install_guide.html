@@ -1,0 +1,595 @@
+<title>VLRS Client Install and First Run</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="guide.css">
+
+<div class="wrap">
+  <nav class="pages" aria-label="Guides">
+    <a href="install_guide.html" aria-current="page">Install and first run</a>
+    <a href="gui_guide.html">GUI guide</a>
+  </nav>
+
+  <div class="top">
+    <div class="intro">
+      <span class="eyebrow">VLRS client</span>
+      <h1>Install and first run</h1>
+      <p>The VLRS client keeps a copy of Vicmap in a PostgreSQL database on your own computer or server. This page takes you from nothing installed to your first layers loaded and kept up to date, one step at a time. Pick your system below and the instructions change to suit it.</p>
+      <div class="os" role="group" aria-label="Your system">
+        <button type="button" data-pick="win">Windows</button>
+        <button type="button" data-pick="mac">macOS</button>
+        <button type="button" data-pick="linux">Linux</button>
+      </div>
+      <nav class="toc" aria-label="Steps">
+        <a href="#install-pg">1. PostgreSQL</a>
+        <a href="#postgis">2. PostGIS</a>
+        <a href="#database">3. Database</a>
+        <a href="#extension">4. Spatial</a>
+        <a href="#client">5. The client</a>
+        <a href="#register">6. Register</a>
+        <a href="#layers">7. Layers</a>
+        <a href="#sync">8. Sync</a>
+        <a href="#check">9. Check</a>
+        <a href="#schedule">10. Schedule</a>
+      </nav>
+    </div>
+    <aside class="steps">
+      <h3>Before you start</h3>
+      <ol>
+        <li>Administrator rights on the computer, to install PostgreSQL and Python.</li>
+        <li>An SSD with room for the data: about <b>150 GB</b> for every layer including the history archives, under <b>50 GB</b> without them, and far less for a few layers. Leave headroom on top.</li>
+        <li>An email address you can open, to validate your registration.</li>
+        <li>About an hour for the setup, plus several hours for a first full download of everything.</li>
+      </ol>
+      <p class="aside-note" style="margin: 14px 0 0">Only browsing the catalogue? Skip to <a href="#client">step 5</a>. PostgreSQL is only needed to download data.</p>
+    </aside>
+  </div>
+
+  <!-- 1 -->
+  <section class="step" id="install-pg">
+    <header>
+      <span class="big">1</span>
+      <div>
+        <h2>Install PostgreSQL 18</h2>
+        <p>PostgreSQL is the database the layers are copied into. Version 18 or later is required, because the data is packaged with 18.</p>
+      </div>
+    </header>
+
+    <div class="body" data-os="win">
+      <div class="prose">
+        <ol>
+          <li>Download the installer for <b>PostgreSQL 18</b> for Windows x86-64 from <a href="https://www.postgresql.org/download/windows/">postgresql.org</a>. It sends you to the EDB download page.</li>
+          <li>Run it and accept the default folders.</li>
+          <li>On <b>Select Components</b> leave all four ticked: the server, pgAdmin 4, Stack Builder and the command line tools. The client needs the command line tools.</li>
+          <li>Choose a password for the <b>postgres</b> superuser and write it down. You need it in step 3.</li>
+          <li>Keep the port at <b>5432</b> and the default locale.</li>
+          <li>At the end, leave <b>Launch Stack Builder</b> ticked and press Finish. Stack Builder is step 2.</li>
+        </ol>
+        <p class="callout warn"><b>Use an SSD</b>Keep the default data folder unless it is on a spinning disk. On a hard disk a sync is many times slower.</p>
+      </div>
+      <div class="media">
+        <figure class="shot" data-shot="shots/db/02-edb-components.png" data-what="The EDB installer's Select Components page, with all four components ticked."></figure>
+        <figure class="shot" data-shot="shots/db/03-edb-password.png" data-what="The EDB installer's superuser password page, with the fields empty."></figure>
+      </div>
+    </div>
+
+    <div class="body" data-os="mac">
+      <div class="prose">
+        <p>The simplest route on a Mac is <b>Postgres.app</b>, which comes with PostGIS built in.</p>
+        <ol>
+          <li>Download Postgres.app with PostgreSQL 18 from <a href="https://postgresapp.com/">postgresapp.com</a>.</li>
+          <li>Drag it into Applications and open it.</li>
+          <li>Press <b>Initialize</b> to create a server. It starts on port 5432.</li>
+        </ol>
+        <p class="callout">The EDB installer from <a href="https://www.postgresql.org/download/macosx/">postgresql.org</a> also works. If you use it, follow the Windows steps, which are the same on a Mac.</p>
+      </div>
+      <div class="media">
+        <figure class="shot mac" data-shot="shots/db/mac-01-postgresapp.png" data-what="The Postgres.app disk image, with Postgres.app and an arrow to the Applications folder."></figure>
+        <figure class="shot mac" data-shot="shots/db/mac-02-postgresapp.png" data-what="The Postgres.app window with a PostgreSQL 18 server running on port 5432."></figure>
+      </div>
+    </div>
+
+    <div class="body" data-os="linux">
+      <div class="prose">
+        <p>Most distributions ship an older PostgreSQL, so add the PostgreSQL project's own repository first. These commands are for Debian and Ubuntu.</p>
+        <p>The first five lines add the repository and its signing key. The last two install PostgreSQL 18 with PostGIS.</p>
+      </div>
+      <div class="media">
+        <div class="term"><div class="bar">Terminal</div><pre><span class="in" data-p="$ ">sudo apt install -y curl ca-certificates</span>
+<span class="in" data-p="$ ">sudo install -d /usr/share/postgresql-common/pgdg</span>
+<span class="in" data-p="$ ">sudo curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc --fail https://www.postgresql.org/media/keys/ACCC4CF8.asc</span>
+<span class="in" data-p="$ ">. /etc/os-release</span>
+<span class="in" data-p="$ ">echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $VERSION_CODENAME-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list</span>
+<span class="in" data-p="$ ">sudo apt update</span>
+<span class="in" data-p="$ ">sudo apt install -y postgresql-18 postgresql-18-postgis-3</span></pre></div>
+        <p class="callout">That installs PostGIS too, so skip step 2. If the machine already runs an older PostgreSQL, version 18 takes the next free port, usually 5433. <code>pg_lsclusters</code> shows which, and that is the port to use in step 6.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2 -->
+  <section class="step" id="postgis">
+    <header>
+      <span class="big">2</span>
+      <div>
+        <h2>Add PostGIS</h2>
+        <p>PostGIS lets PostgreSQL store maps: points, lines and areas. Vicmap needs it.</p>
+      </div>
+    </header>
+
+    <div class="body" data-os="win">
+      <div class="prose">
+        <ol>
+          <li>Stack Builder opens after the installer. If you closed it, find <b>Application Stack Builder</b> in the Start menu.</li>
+          <li>Pick <b>PostgreSQL 18 on port 5432</b> from the list and press Next.</li>
+          <li>Open <b>Spatial Extensions</b> and tick the <b>PostGIS bundle</b> for PostgreSQL 18.</li>
+          <li>Press Next through the download, then run the PostGIS installer. Accept its defaults. If it offers to create a spatial database, untick that. Step 3 makes the database.</li>
+        </ol>
+      </div>
+      <div class="media">
+        <figure class="shot" data-shot="shots/db/04-stackbuilder-server.png" data-what="Stack Builder's first page, with the PostgreSQL 18 server chosen."></figure>
+        <figure class="shot" data-shot="shots/db/05-stackbuilder-postgis.png" data-what="Stack Builder with Spatial Extensions open and the PostGIS bundle ticked."></figure>
+      </div>
+    </div>
+
+    <div class="body wide" data-os="mac">
+      <p class="callout">Postgres.app already includes PostGIS, so there is nothing to do here. If you used the EDB installer, follow the Windows steps.</p>
+    </div>
+
+    <div class="body wide" data-os="linux">
+      <p class="callout">PostGIS came with <code>postgresql-18-postgis-3</code> in step 1, so there is nothing to do here.</p>
+    </div>
+  </section>
+
+  <!-- 3 -->
+  <section class="step" id="database">
+    <header>
+      <span class="big">3</span>
+      <div>
+        <h2>Create the vicmap database and user</h2>
+        <p>The client gets a database of its own, called vicmap, and a user, also called vicmap, that can reach only that database. That way the client never needs the superuser password.</p>
+      </div>
+    </header>
+
+    <div class="body">
+      <div class="prose">
+        <ol data-os="win">
+          <li>Open <b>pgAdmin 4</b> from the Start menu. Enter the superuser password from step 1 when asked.</li>
+          <li>In the tree on the left open <b>Servers</b>, then <b>PostgreSQL 18</b>, then <b>Databases</b>, and click <b>postgres</b>.</li>
+          <li>Open <b>Tools</b>, then <b>Query Tool</b>.</li>
+          <li>Paste the commands on the right. Run them one at a time: highlight a command, press <b>F5</b>, and check the Messages tab before going on to the next. The three should report <code>CREATE ROLE</code>, <code>CREATE DATABASE</code> and <code>GRANT</code>.</li>
+        </ol>
+        <p class="callout warn" data-os="win"><b>CREATE DATABASE cannot run inside a transaction block</b>pgAdmin shows this if you press F5 with nothing highlighted. It sends the whole script as one transaction, and PostgreSQL will not create a database inside one, so none of the commands took effect. Run them again one at a time.</p>
+        <ol data-os="mac">
+          <li>In Postgres.app, double-click the <b>postgres</b> database. A terminal opens, connected as the superuser.</li>
+          <li>Paste the commands on the right and press Enter.</li>
+        </ol>
+        <ol data-os="linux">
+          <li>Open a terminal and connect as the superuser with <code>sudo -u postgres psql</code>.</li>
+          <li>Paste the commands on the right and press Enter.</li>
+        </ol>
+        <p class="callout"><b>About the password</b>The password vicmap is a deliberate default. Everything in this database can be downloaded again from VLRS, so it needs little protection. If your organisation has rules about passwords, or the database can be reached from the internet, choose a stronger one and use it in step 6 instead.</p>
+      </div>
+      <div class="media">
+        <div class="term"><div class="bar">SQL, run as postgres <button class="copy" type="button">Copy</button></div><pre><span class="in">CREATE ROLE vicmap LOGIN PASSWORD 'vicmap'
+  NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
+
+CREATE DATABASE vicmap;
+
+GRANT CREATE ON DATABASE vicmap TO vicmap;</span></pre></div>
+        <figure class="shot" data-os="win" data-shot="shots/db/06-pgadmin-query.png" data-what="pgAdmin's Query Tool connected to the postgres database, with the CREATE ROLE command highlighted and run, and CREATE ROLE in the Messages tab."></figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 -->
+  <section class="step" id="extension">
+    <header>
+      <span class="big">4</span>
+      <div>
+        <h2>Switch on PostGIS in the vicmap database</h2>
+        <p>PostGIS is installed, but each database has to switch it on for itself. This one is easy to get wrong, so check which database you are connected to.</p>
+      </div>
+    </header>
+
+    <div class="body">
+      <div class="prose">
+        <ol data-os="win">
+          <li>In pgAdmin, right-click <b>Databases</b> and choose <b>Refresh</b>. The new <b>vicmap</b> database appears.</li>
+          <li>Click <b>vicmap</b>, then open <b>Tools</b>, then <b>Query Tool</b>. The title of the new tab should say <b>vicmap</b>, not postgres.</li>
+          <li>Run the commands on the right. The last one should print a line starting <code>POSTGIS="3.</code></li>
+        </ol>
+        <ol data-os="mac linux">
+          <li>In the same terminal, paste the commands on the right. The first line moves you into the vicmap database.</li>
+          <li>The last one should print a line starting <code>POSTGIS="3.</code></li>
+          <li>Type <code>\q</code> to leave.</li>
+        </ol>
+        <p class="callout warn"><b>Wrong database?</b>If you run this while connected to postgres, PostGIS is switched on there instead, and the client reports that it is missing. Run it again in vicmap. It does no harm to have it in both.</p>
+      </div>
+      <div class="media">
+        <div class="term" data-os="win"><div class="bar">SQL, run as postgres in the vicmap database <button class="copy" type="button">Copy</button></div><pre><span class="in">CREATE EXTENSION postgis;
+SELECT postgis_full_version();</span></pre></div>
+        <div class="term" data-os="mac linux"><div class="bar">SQL, run as postgres in the vicmap database <button class="copy" type="button">Copy</button></div><pre><span class="in">\c vicmap
+CREATE EXTENSION postgis;
+SELECT postgis_full_version();</span></pre></div>
+        <figure class="shot" data-os="win" data-shot="shots/db/07-pgadmin-vicmap.png" data-what="pgAdmin's Query Tool on the vicmap database, showing the postgis_full_version result."></figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5 -->
+  <section class="step" id="client">
+    <header>
+      <span class="big">5</span>
+      <div>
+        <h2>Install Python and the client</h2>
+        <p>The client is a Python program. It needs Python 3.12 or later, and 3.14 is recommended.</p>
+      </div>
+    </header>
+
+    <div class="body">
+      <div class="prose">
+        <ol data-os="win">
+          <li>Download the <b>Python install manager</b> from <a href="https://www.python.org/downloads/">python.org</a> and run it.</li>
+          <li>A console window then asks three questions. Answer <b>Y</b> to each: long path support, adding the commands directory to PATH, and installing the latest CPython. That Python includes Tk, which the client's window needs.</li>
+          <li>Install <a href="https://git-scm.com/downloads">Git</a> with its defaults. It makes updating the client a one line job later.</li>
+          <li>Open <b>PowerShell</b> from the Start menu and run the commands on the right, one line at a time.</li>
+        </ol>
+        <ol data-os="mac">
+          <li>The Mac's own Python is too old. Download Python 3.14 from <a href="https://www.python.org/downloads/">python.org</a> and run the installer.</li>
+          <li>Git comes with the Xcode command line tools. If <code>git</code> is missing the first command below offers to install them.</li>
+          <li>Open <b>Terminal</b> and run the commands on the right, one line at a time.</li>
+        </ol>
+        <ol data-os="linux">
+          <li>Check your Python with <code>python3 -V</code>. If it is 3.12 or later, install the extras below. If it is older, install a newer Python first.</li>
+          <li>Run the commands on the right, one line at a time.</li>
+        </ol>
+        <p>The commands download the client into a folder called VLRS in your home folder, give it a private set of Python packages, and open its window. No data is downloaded yet.</p>
+        <p class="callout"><b>Always start it from the VLRS folder</b>The client keeps its settings, downloads and log in the folder it is started from. Start it from anywhere else and it behaves as if it had never been set up.</p>
+      </div>
+      <div class="media">
+        <figure class="shot" data-os="win" data-shot="shots/db/08-python-installer.png" data-what="The Python install manager's configuration helper, with Y given to long paths, PATH and installing CPython."></figure>
+        <div class="term" data-os="win"><div class="bar">PowerShell <button class="copy" type="button">Copy</button></div><pre><span class="in" data-p="> ">cd $HOME</span>
+<span class="in" data-p="> ">git clone https://github.com/VicmapSpatialServices/deltaVic.git VLRS</span>
+<span class="in" data-p="> ">cd VLRS</span>
+<span class="in" data-p="> ">py -m venv .venv</span>
+<span class="in" data-p="> ">.venv\Scripts\pip install -r requirements.txt</span>
+<span class="out">Successfully installed certifi charset-normalizer idna psycopg2-binary requests urllib3</span>
+<span class="in" data-p="> ">.venv\Scripts\python deltaVic.py</span></pre></div>
+        <div class="term" data-os="mac"><div class="bar">Terminal <button class="copy" type="button">Copy</button></div><pre><span class="in" data-p="$ ">cd ~</span>
+<span class="in" data-p="$ ">git clone https://github.com/VicmapSpatialServices/deltaVic.git VLRS</span>
+<span class="in" data-p="$ ">cd VLRS</span>
+<span class="in" data-p="$ ">python3 -m venv .venv</span>
+<span class="in" data-p="$ ">.venv/bin/pip install -r requirements.txt</span>
+<span class="out">Successfully installed certifi charset-normalizer idna psycopg2-binary requests urllib3</span>
+<span class="in" data-p="$ ">.venv/bin/python deltaVic.py</span></pre></div>
+        <div class="term" data-os="linux"><div class="bar">Terminal <button class="copy" type="button">Copy</button></div><pre><span class="in" data-p="$ ">sudo apt install -y git python3-venv python3-tk</span>
+<span class="in" data-p="$ ">cd ~</span>
+<span class="in" data-p="$ ">git clone https://github.com/VicmapSpatialServices/deltaVic.git VLRS</span>
+<span class="in" data-p="$ ">cd VLRS</span>
+<span class="in" data-p="$ ">python3 -m venv .venv</span>
+<span class="in" data-p="$ ">.venv/bin/pip install -r requirements.txt</span>
+<span class="in" data-p="$ ">.venv/bin/python deltaVic.py</span></pre></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6 -->
+  <section class="step" id="register">
+    <header>
+      <span class="big">6</span>
+      <div>
+        <h2>Register and connect the database</h2>
+        <p>The window opens on Setup &amp; QA. Work down it once. The <a href="gui_guide.html#setup">GUI guide</a> shows every control on this page in detail.</p>
+      </div>
+    </header>
+
+    <div class="body">
+      <div class="prose">
+        <ol>
+          <li>Type your email into the registration fields and press <b>Refresh</b>. VLRS emails you a validation link.</li>
+          <li>Open that email and click the link. Back in the window, press <b>Refresh</b> again. Both registration checks turn green.</li>
+          <li>Fill in the database fields: Endpoint <b>localhost</b>, Instance <b>vicmap</b>, Port <b>5432</b> (or the port from step 1), Username <b>vicmap</b> and Password <b>vicmap</b>, or the password you chose in step 3.</li>
+          <li>Check <b>Bin path</b>. It should be the folder holding <code>pg_restore</code>. The usual one is filled in for you:
+            <span data-os="win"><code>C:\Program Files\PostgreSQL\18\bin</code></span><span data-os="mac">for Postgres.app change it to <code>/Applications/Postgres.app/Contents/Versions/18/bin</code></span><span data-os="linux"><code>/usr/lib/postgresql/18/bin</code></span>.</li>
+          <li>Press <b>Test database</b>. It checks the connection, the client tools, PostGIS and the client's own tables, and creates those tables the first time. All four should turn green.</li>
+        </ol>
+        <p class="callout">If a check stays red, the status bar at the bottom says why. The most common causes are a wrong password, a bin path pointing at an older PostgreSQL, and PostGIS switched on in the wrong database (step 4).</p>
+      </div>
+      <div class="media">
+        <figure class="shot" data-trim="32" data-shot="shots/01-setup.png" data-what="The Setup &amp; QA tab."><figcaption>Setup &amp; QA with registration and all database checks passed.</figcaption></figure>
+        <figure class="shot" data-shot="shots/db/09-validation-email.png" data-what="The validation email from VLRS, with its Verify my email button and link."></figure>
+      </div>
+    </div>
+
+    <details class="body wide" style="margin-top: 24px">
+      <summary><b>Prefer the command line?</b> The same setup without the window.</summary>
+      <div class="prose" style="margin-top: 14px">
+        <p>Run <code>setup</code> twice. The first run registers your email and stops while you click the validation link. The second fetches your API key, asks for the database details and runs the same four checks. Press Enter at a question to accept the default shown in brackets. Lines in yellow are what you type.</p>
+        <div class="term"><div class="bar">First run</div><pre><span class="in" data-p="> ">.venv\Scripts\python deltaVic.py setup</span>
+<span class="out">setup
+
+Assessing registration...
+Enter your email (default:somebody+dvic@example.org): </span><span class="you">you@example.com</span>
+<span class="out">Client_id not yet verified, please check your inbox for you@example.com</span></pre></div>
+        <div class="term"><div class="bar">Second run, after clicking the link</div><pre><span class="in" data-p="> ">.venv\Scripts\python deltaVic.py setup</span>
+<span class="out">setup
+
+Assessing registration...
+[INFO]  Submitting client_id to obtain an api-key
+[INFO]  Updating config file with api_key...
+
+Performing database configuration... (press enter for default).
+Enter database host (default:localhost): </span><span class="you">⏎</span>
+<span class="out">Enter database port (default:5432): </span><span class="you">⏎</span>
+<span class="out">Enter database name (default:vicmap): </span><span class="you">⏎</span>
+<span class="out">Enter database username (default:vicmap): </span><span class="you">⏎</span>
+<span class="out">Enter database passowrd (default:vicmap): </span><span class="you">⏎</span>
+<span class="out">Enter database client path (default:C:\Program Files\PostgreSQL\18\bin): </span><span class="you">⏎</span>
+<span class="ok">[INFO]  db test successful
+[INFO]  PostGis test successful: [('POSTGIS="3.6.4 94d984b" [EXTENSION] PGSQL="180" ...',)]
+[INFO]  PostGres Client test successful. Version: pg_restore (PostgreSQL) 18.4</span>
+<span class="out">checking metadata</span></pre></div>
+        <p>Each log line also starts with the date and time, left out here to keep it readable.</p>
+      </div>
+    </details>
+  </section>
+
+  <!-- 7 -->
+  <section class="step" id="layers">
+    <header>
+      <span class="big">7</span>
+      <div>
+        <h2>Choose your layers</h2>
+        <p>Nothing is switched on to start with, so nothing downloads until you choose.</p>
+      </div>
+    </header>
+
+    <div class="body">
+      <div class="prose">
+        <ol>
+          <li>Open the <b>Meta</b> tab.</li>
+          <li>Pick a schema on the left, such as <b>vmadmin</b> for administrative boundaries or <b>vmadd</b> for addresses.</li>
+          <li>Tick the layers you want. <b>All on</b> ticks every layer in that schema. Each tick is saved straight away.</li>
+          <li>Click a layer's name to see its columns and its update history.</li>
+          <li>The <b>vmhist</b> schema holds the history archives, every past version of the VLAT and VTT layers. Leave it unticked unless you need that history.</li>
+        </ol>
+        <p class="callout"><b>Not sure what you need?</b>Start small. Everything together is about 150 GB and takes hours the first time, and the vmhist history archives are most of that. A handful of schemas such as vmadmin takes minutes, and you can tick more later.</p>
+      </div>
+      <div class="media">
+        <figure class="shot" data-trim="32" data-shot="shots/03-meta-schema.png" data-what="The Meta tab."><figcaption>The Meta tab with a schema open. The <a href="gui_guide.html#meta">GUI guide</a> explains each part.</figcaption></figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- 8 -->
+  <section class="step" id="sync">
+    <header>
+      <span class="big">8</span>
+      <div>
+        <h2>Run your first sync</h2>
+        <p>A sync downloads every ticked layer you do not have yet, and brings the ones you have up to date.</p>
+      </div>
+    </header>
+
+    <div class="body">
+      <div class="prose">
+        <ol>
+          <li>Go back to <b>Setup &amp; QA</b> and press <b>SYNC</b>.</li>
+          <li>The button reads SYNCING and a bar moves in the status bar. You can keep using the window.</li>
+          <li>Progress is written to the terminal you started the client from, and to the file <code>deltaVic.log</code> in the VLRS folder.</li>
+          <li>When it finishes, the Replication counts on Setup &amp; QA show how many layers are active and how many are in error. Errors should be 0.</li>
+        </ol>
+        <p>The terminal shows each layer as it is fetched. In a line such as <code>(VLAT:-1:full)--&gt;(656:full)</code> the left side is what you held, where -1 means nothing yet, and the right side is the supply being loaded. A <b>full</b> supply is a complete copy, an <b>inc</b> is just the week's changes.</p>
+        <p class="callout warn"><b>Do not edit the synced tables</b>Each update is checked against VLRS. A table that has been edited no longer matches, and that layer stops updating until it is reloaded. Copy what you want to change into a schema of your own first.</p>
+      </div>
+      <div class="media">
+        <div class="term"><div class="bar">An example sync, shortened</div><pre><span class="out">[INFO]  Layer state: 439 in vm_meta.data, 12 active, 0 errors. 439 available from vicmap_master
+[INFO]  To Process: 12 table(s) and 0 view(s)
+[INFO]  q-ing vmadmin.lga_polygon (VLAT:-1:full)--&gt;(656:full)
+[INFO]  q-ing vmadmin.locality_polygon (VLAT:-1:full)--&gt;(656:full)
+<span class="cm">...</span>
+[INFO]  --timings report--
+[INFO]  queued    :    25.63
+[INFO]  download  :    97.67
+[INFO]  restore   :    41.15
+[INFO]  reconcile :     3.02
+[INFO]  clean     :     0.05
+[INFO]  Layer state: 439 in vm_meta.data, 12 active, 0 errors. 439 available from vicmap_master</span>
+<span class="ok">[INFO]  Duration: 0:03:12</span></pre></div>
+        <p class="callout">From the command line the same sync is <code data-os="win">.venv\Scripts\python deltaVic.py sync</code><code data-os="mac linux">.venv/bin/python deltaVic.py sync</code>, run from the VLRS folder.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 9 -->
+  <section class="step" id="check">
+    <header>
+      <span class="big">9</span>
+      <div>
+        <h2>Look at what arrived</h2>
+        <p>Each Vicmap schema is now a schema in your vicmap database, and each layer a table.</p>
+      </div>
+    </header>
+
+    <div class="body">
+      <div class="prose">
+        <ol>
+          <li>Install <a href="https://dbeaver.io/download/">DBeaver</a>, a free database browser that can draw maps.</li>
+          <li>Add a PostgreSQL connection: host localhost, port 5432, database vicmap, username vicmap, password vicmap.</li>
+          <li>Open <b>vicmap</b>, then <b>Schemas</b>, then a schema such as <b>vmadmin</b>, and double-click a table.</li>
+          <li>On the <b>Data</b> tab, click a geometry cell, then the <b>Value</b> panel's map view, to see the shapes on a map.</li>
+        </ol>
+        <p>QGIS reads the same database, through <b>Layer</b>, <b>Add Layer</b>, <b>Add PostGIS Layers</b>, with the same connection details.</p>
+        <p>To see what you hold and when it last changed, run this in DBeaver's SQL editor:</p>
+        <div class="term"><div class="bar">SQL <button class="copy" type="button">Copy</button></div><pre><span class="in">SELECT identity, sup, sup_ver, sup_type, status, err, edit_date
+  FROM vm_meta.data
+ WHERE active
+ ORDER BY edit_date DESC;</span></pre></div>
+      </div>
+      <div class="media">
+        <figure class="shot" data-shot="shots/db/10-dbeaver-layer.png" data-what="DBeaver showing a synced layer, such as vmadmin.lga_polygon, with its geometry drawn in the map view."></figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- 10 -->
+  <section class="step" id="schedule">
+    <header>
+      <span class="big">10</span>
+      <div>
+        <h2>Keep it up to date</h2>
+        <p>The client only fetches changes when a sync runs, so on its own your copy stays as it was on the day of step 8. Schedule a sync every hour and it follows Vicmap within the hour. Run it at some minute past the hour rather than on it, so not everyone asks VLRS at once.</p>
+      </div>
+    </header>
+
+    <div class="body" data-os="win">
+      <div class="prose">
+        <ol>
+          <li>Open <b>Task Scheduler</b> from the Start menu and choose <b>Create Task</b>.</li>
+          <li><b>General</b>: name it VLRS sync, and choose <b>Run whether user is logged on or not</b>.</li>
+          <li><b>Triggers</b>: New, Daily, starting at a time such as 00:17, with <b>Repeat task every 1 hour</b> for a duration of <b>Indefinitely</b>.</li>
+          <li><b>Actions</b>: New, Start a program, filled in as in the table.</li>
+          <li><b>Settings</b>: set <b>If the task is already running</b> to <b>Do not start a new instance</b>.</li>
+        </ol>
+        <table class="plain">
+          <tr><th>Program/script</th><td><code>C:\Users\you\VLRS\.venv\Scripts\python.exe</code></td></tr>
+          <tr><th>Add arguments</th><td><code>deltaVic.py sync</code></td></tr>
+          <tr><th>Start in</th><td><code>C:\Users\you\VLRS</code></td></tr>
+        </table>
+        <p class="callout warn"><b>Start in matters</b>Leave it empty and the task runs somewhere else, finds no settings, and does nothing useful.</p>
+      </div>
+      <div class="media">
+        <figure class="shot" data-shot="shots/db/11-task-scheduler-trigger.png" data-what="Task Scheduler's New Trigger dialog set to daily, repeating every hour indefinitely."></figure>
+        <figure class="shot" data-shot="shots/db/12-task-scheduler-action.png" data-what="Task Scheduler's New Action dialog filled in with the program, arguments and Start in folder."></figure>
+      </div>
+    </div>
+
+    <div class="body" data-os="mac">
+      <div class="prose">
+        <ol>
+          <li>Open the schedule with <code>crontab -e</code>.</li>
+          <li>Add the line on the right, with your own minute in place of 17 and your own path in place of the home folder.</li>
+          <li>Save and close. It runs at that minute every hour.</li>
+        </ol>
+        <p>A first sync can take hours, and cron starts the next run on time regardless. <code>flock</code> skips a run while the last one is still going. macOS does not have it, so install it with <code>brew install flock</code> or leave that part out.</p>
+      </div>
+      <div class="media">
+        <div class="term"><div class="bar">crontab <button class="copy" type="button">Copy</button></div><pre><span class="in">17 * * * * cd $HOME/VLRS &amp;&amp; flock -n /tmp/vlrs-sync.lock .venv/bin/python deltaVic.py sync &gt;/dev/null 2&gt;&amp;1</span></pre></div>
+      </div>
+    </div>
+
+    <div class="body" data-os="linux">
+      <div class="prose">
+        <p>A systemd timer runs the sync every hour, at a minute of its own choosing, and never starts a new one while the last is still going.</p>
+        <ol>
+          <li>Create the two files on the right as root, for example with <code>sudo nano /etc/systemd/system/vlrs-sync.service</code>. Put your own username in place of <b>you</b>.</li>
+          <li>Switch the timer on with the first two commands below.</li>
+          <li>The third shows when it runs next. The fourth shows what the last runs printed.</li>
+        </ol>
+        <div class="term"><div class="bar">Terminal <button class="copy" type="button">Copy</button></div><pre><span class="in" data-p="$ ">sudo systemctl daemon-reload</span>
+<span class="in" data-p="$ ">sudo systemctl enable --now vlrs-sync.timer</span>
+<span class="in" data-p="$ ">systemctl list-timers vlrs-sync.timer</span>
+<span class="in" data-p="$ ">journalctl -u vlrs-sync.service -e</span></pre></div>
+        <p class="callout"><b>No systemd?</b>Use cron instead, installing it with <code>sudo apt install cron</code> if it is missing. Cron starts a run on time even when the last is still going, so the line puts <code>flock</code> in front to skip that run. Add it with <code>crontab -e</code>:</p>
+        <div class="term"><div class="bar">crontab <button class="copy" type="button">Copy</button></div><pre><span class="in">17 * * * * cd $HOME/VLRS &amp;&amp; flock -n /tmp/vlrs-sync.lock .venv/bin/python deltaVic.py sync &gt;/dev/null 2&gt;&amp;1</span></pre></div>
+      </div>
+      <div class="media">
+        <div class="term"><div class="bar">/etc/systemd/system/vlrs-sync.service <button class="copy" type="button">Copy</button></div><pre><span class="in">[Unit]
+Description=VLRS sync
+Wants=network-online.target
+After=network-online.target postgresql.service
+
+[Service]
+Type=oneshot
+User=you
+WorkingDirectory=/home/you/VLRS
+ExecStart=/home/you/VLRS/.venv/bin/python deltaVic.py sync
+TimeoutStartSec=infinity</span></pre></div>
+        <div class="term"><div class="bar">/etc/systemd/system/vlrs-sync.timer <button class="copy" type="button">Copy</button></div><pre><span class="in">[Unit]
+Description=Run the VLRS sync hourly
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=1h
+FixedRandomDelay=true
+Persistent=true
+
+[Install]
+WantedBy=timers.target</span></pre></div>
+      </div>
+    </div>
+
+    <div class="body wide" style="margin-top: 28px">
+      <p class="callout">The main Vicmap updates usually land on Friday night, and an hourly sync picks up everything else as it happens. After the first download, a weekly update of everything normally takes under 10 minutes. If yours regularly takes much longer, tell the Vicmap team at <a href="mailto:vicmap.help@transport.vic.gov.au">vicmap.help@transport.vic.gov.au</a>.</p>
+    </div>
+  </section>
+
+  <p class="foot">The technical reference, covering every command, setting and error message, is README_UPDATE.md in the VLRS folder.</p>
+</div>
+
+<script>
+  // Fills each figure with its screenshot, or with a dashed slot naming the file to capture
+  // when that screenshot has not been added to the shots folder yet.
+  document.querySelectorAll('.shot[data-shot]').forEach((fig) => {
+    const src = fig.dataset.shot;
+    const img = document.createElement('img');
+    img.alt = fig.dataset.what;
+    img.addEventListener('error', () => fig.classList.add('missing'));
+    // Window captures carry a drop shadow of this many pixels, cropped off by oversizing the
+    // image inside a box that hides the overflow.
+    const trim = Number(fig.dataset.trim || 0);
+    if (trim) {
+      img.addEventListener('load', () => {
+        const inner = img.naturalWidth - 2 * trim;
+        img.style.width = `${(100 * img.naturalWidth) / inner}%`;
+        img.style.margin = `${(-100 * trim) / inner}%`;
+        img.style.maxWidth = 'none';
+        img.style.borderRadius = '0';
+        img.style.boxShadow = 'none';
+        frame.classList.add('trimmed');
+      });
+    }
+    img.src = src;
+    const frame = document.createElement('div');
+    frame.append(img);
+    const slot = document.createElement('div');
+    slot.className = 'slot';
+    slot.innerHTML = '<b>Screenshot to add</b><span></span><code></code>';
+    slot.querySelector('span').textContent = fig.dataset.what;
+    slot.querySelector('code').textContent = 'guide/' + src;
+    fig.prepend(slot);
+    fig.prepend(frame);
+  });
+
+  // Shows only the instructions for the chosen system, and remembers the choice.
+  const guess = /Mac/.test(navigator.platform) ? 'mac' : /Linux/.test(navigator.platform) ? 'linux' : 'win';
+  const pickOs = (os) => {
+    // A page opened from a file may refuse storage, and then the choice lasts only this visit.
+    try { localStorage.setItem('vlrs-os', os); } catch {}
+    document.querySelectorAll('[data-pick]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.pick === os)));
+    document.querySelectorAll('[data-os]').forEach((el) => el.classList.toggle('os-on', el.dataset.os.split(' ').includes(os)));
+  };
+  let saved = null;
+  try { saved = localStorage.getItem('vlrs-os'); } catch { saved = null; }
+  // A link can name the system, as install_guide.html?os=mac, to send someone straight to theirs.
+  const asked = new URLSearchParams(location.search).get('os');
+  pickOs(['win', 'mac', 'linux'].includes(asked) ? asked : saved || guess);
+  document.querySelectorAll('[data-pick]').forEach((b) => b.addEventListener('click', () => pickOs(b.dataset.pick)));
+
+  // Copies the lines a reader types, leaving out prompts and printed output.
+  document.querySelectorAll('.copy').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const lines = [...btn.closest('.term').querySelectorAll('.in')].map((el) => el.textContent);
+      try {
+        await navigator.clipboard.writeText(lines.join('\n'));
+        btn.textContent = 'Copied';
+      } catch (err) {
+        btn.textContent = 'Select and copy';
+      }
+      setTimeout(() => { btn.textContent = 'Copy'; }, 1600);
+    });
+  });
+</script>

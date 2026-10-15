@@ -1,0 +1,42 @@
+# Ruff handles both linting and formatting for the Python in this repo.
+
+#   ruff check .          report problems
+#   ruff check --fix .    apply the safe fixes
+#   ruff format .         format
+
+line-length = 100
+indent-width = 2
+target-version = "py314"
+
+exclude = [
+  "temp",   # working directory for the dumps a sync downloads
+  "assets/sql",
+]
+
+[format]
+# Leave existing quoting alone. Normalising it would touch almost every line for
+# no benefit, and SQL strings often pick a quote to avoid escaping the other.
+quote-style = "preserve"
+
+[lint]
+select = [
+  "E",      # pycodestyle errors
+  "F",      # pyflakes: undefined names, unused imports
+  "W",      # pycodestyle warnings
+  "B",      # bugbear: likely bugs rather than style
+  "UP",     # pyupgrade: outdated syntax for the target version
+  "SIM",    # simplifiable code
+  "C4",     # comprehension shortcuts
+  "RET",    # return statement consistency
+  "PTH",    # pathlib over os.path
+  "RUF059", # a name bound by tuple unpacking and then never used
+  "PT",     # flake8-pytest-style: bugs specific to tests
+]
+
+ignore = [
+  "E501",   # line length is the formatter's job, and long SQL should stay readable
+  "E741",   # short loop and comprehension names are used deliberately here
+  "PTH123", # open() is fine and reads better than Path.open() in short scripts
+  "RET504", # a named result before returning it often documents the return
+  "SIM108", # a ternary is not always clearer than the if it replaces
+]

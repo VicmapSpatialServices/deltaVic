@@ -1,442 +1,1084 @@
-from tkinter import Tk, Button, Checkbutton, Frame, Label, Entry, StringVar, IntVar, END, Scrollbar, Canvas
-from tkinter import ttk
-# import tkinter as tk
-import logging, traceback, math
-from datetime import datetime
+import logging
+import math
+import queue
+import threading
+import traceback
 import webbrowser
+from collections.abc import Callable
+from datetime import datetime
+from pathlib import Path
+from tkinter import Canvas, IntVar, Misc, PhotoImage, StringVar, TclError, Tk, ttk
+from typing import Any, Literal
 
-from .utils_db import DB
+from .dbTable import LyrReg, Schema, Schemas
 from .setup import QA
-from .sync import Synccer, Supplies
-from .utils import Config
-
+from .sync import Supplies, Synccer
+from .utils import Config, pgBinDefault
 from .utils_api import ApiUtils
+from .utils_db import DB
 
-from .dbTable import LyrReg, Schemas
+# Where tkinter puts a widgets content inside its cell.
+Anchor = Literal['nw', 'n', 'ne', 'w', 'center', 'e', 'sw', 's', 'se']
 
-class StyMan():
-  qaClrFail = 'orange'
-  qaClrPass = 'OliveDrab3'
-  bgClrFail = 'brown'
-  bgClrPass = 'skyblue'
-  bgClrData = 'white'
+IMG = Path(__file__).parent / 'img'
 
-  supVLAT = 'midnight blue'
-  supVTT = 'dark green'
-  supMISC = 'saddle brown'
 
-  def __init__(self):
-    # https://www.google.com/search?q=tkinter+colours
-    
+# The pointer to hover an editable field with. Windows and macOS draw a text cursor sized
+# for their own screen, so they keep it. X11 hands back whatever the desktop cursor theme
+# holds, which on a scaled display is a 48 pixel bar over a one line entry, and no cursor
+# name asks for a smaller one. A bitmap of our own making is the only size a theme cannot
+# override. The paths are braced because the spec is read as a tcl list.
+def textCursor(win: Misc) -> str:
+  global _textCursorSpec
+  if _textCursorSpec is None:  # every entry wants the same one, so it is worked out once
+    _textCursorSpec = _pickTextCursor(win)
+  return _textCursorSpec
+
+
+_textCursorSpec: str | None = None
+
+
+def _pickTextCursor(win: Misc) -> str:
+  if win.tk.call('tk', 'windowingsystem') != 'x11':
+    return 'xterm'
+  _src, _msk = IMG / 'ibeam.xbm', IMG / 'ibeam_mask.xbm'
+  if not (_src.exists() and _msk.exists()):
+    return 'xterm'
+  _spec = f'{{@{_src}}} {{{_msk}}} black white'
+  try:  # a server that will not take the bitmap keeps the one it has
+    ttk.Entry(win, cursor=_spec).destroy()
+  except TclError:
+    logging.debug(f"X11 would not take the entry cursor bitmap, keeping xterm: {_spec}")
+    return 'xterm'
+  return _spec
+
+
+class Ves:
+  # The Vicmap Editing Service palette from ves_frontend/src/theme.css.
+  ink = '#2a2440'
+  muted = '#6a6577'
+  line = '#e3dfea'
+  navy = '#201547'
+  navy2 = '#2e2063'
+  purple = '#895a8b'
+  purpleBg = '#f2ecf4'
+  purpleLine = '#dcc9de'
+  charcoal = '#3b3b3f'
+  white = '#ffffff'
+  ok = '#2e7d32'
+  err = '#9b1c1c'
+  warn = '#8a5a00'
+  info = '#1565c0'
+  hover = '#e6e3ee'
+  picked = '#dcc9de'
+  control = '#f4f1f8'
+
+  # Which contract maintains a layer. Darker than the ok and warn they started as, so a
+  # white tick reads on a filled box and the layer names carry on white as well.
+  supVLAT = navy2
+  supVTT = '#1b5e20'
+  supMISC = '#6e4500'
+
+
+class StyMan:
+  # Fonts, using defaults.
+  fontBase = ('TkDefaultFont', 10)
+  fontBold = ('TkDefaultFont', 10, 'bold')
+  fontSmall = ('TkDefaultFont', 9)
+  fontHeading = ('TkDefaultFont', 11, 'bold')
+  fontTitle = ('TkDefaultFont', 13, 'bold')
+
+  def __init__(self) -> None:
     self.style = ttk.Style()
-    # self.style.configure("TButton", padding=6, font=("Arial", 12))
-    # self.style.configure("Active.TButton", background="green", foreground=StyMan.bgClrData, font=("Arial", 12, "bold"))
-    self.style.theme_create( "VlrsStyle", parent="default", settings={
-      "TNotebook": {"configure": {"tabmargins": [2, 5, 2, 0] } },
-      "TNotebook.Tab": {"configure": {"padding": [60, 10], "background":self.bgClrPass, "font" : ('URW Gothic L', '11', 'bold')},},
-      "bad.TNotebook.Tab": {"configure": {"padding": [60, 10], "background":self.bgClrFail, "font" : ('URW Gothic L', '11', 'bold')},},
-      "TFrame": {"configure": {"background":self.bgClrPass}},
-      "bad.TFrame": {"configure": {"background":self.bgClrPass}},
-      "lyrInfo.TFrame": {"configure": {"background": StyMan.bgClrData}},
-      "metaLink.TLabel": {"configure": {"background": StyMan.bgClrData, "font" : ('Sans','10','bold', 'underline')}},
-      "treeHeading.TLabel": {"configure": {"background": StyMan.bgClrData, "font" : ('Sans','9','bold')}},
-      "Bold.TLabel": {"configure": {"font":('Helvetica', 12, 'bold')}}
-    })
-    self.style.theme_use("VlrsStyle")
-    # self.style.configure('Good', background=self.bgClrPass) # Create style used by default for all Frames
-    # self.style.configure('TFrame', background=self.bgClrFail) # Create style for the first frame
+    # Style: clam is the one theme here that draws a flat widget.
+    self.style.theme_create("vlrsVes", parent="clam")
+    self.style.theme_use("vlrsVes")
+    self._frames()
+    self._labels()
+    self._buttons()
+    self._inputs()
+    self._notebook()
+    self._table()
+
+  def _frames(self) -> None:
+    st = self.style
+    st.configure('TFrame', background=Ves.purpleBg)
+    st.configure('Logo.TFrame', background=Ves.white)
+    st.configure('Banner.TFrame', background=Ves.navy)
+    st.configure('Rule.TFrame', background=Ves.purple)
+    st.configure('Status.TFrame', background=Ves.white)
+    st.configure(
+      'Qa.TFrame', background=Ves.white, borderwidth=1, relief='solid', bordercolor=Ves.line
+    )
+    st.configure('Plain.TFrame', background=Ves.white, borderwidth=0)
+    st.configure(
+      'Key.TFrame',
+      background=Ves.purpleBg,
+      borderwidth=1,
+      relief='solid',
+      bordercolor=Ves.purpleLine,
+    )
+    st.configure(
+      'Card.TFrame', background=Ves.white, borderwidth=1, relief='solid', bordercolor=Ves.line
+    )
+
+  def _labels(self) -> None:
+    st = self.style
+    st.configure('TLabel', background=Ves.purpleBg, foreground=Ves.charcoal, font=self.fontBase)
+    st.configure('Card.TLabel', background=Ves.white, foreground=Ves.charcoal, font=self.fontBase)
+    st.configure('Head.TLabel', background=Ves.white, foreground=Ves.ink, font=self.fontHeading)
+    st.configure('Muted.TLabel', background=Ves.white, foreground=Ves.muted, font=self.fontSmall)
+    st.configure('KeyText.TLabel', background=Ves.purpleBg, foreground=Ves.ink, font=self.fontSmall)
+    st.configure('Title.TLabel', background=Ves.navy, foreground=Ves.white, font=self.fontTitle)
+    st.configure('Sub.TLabel', background=Ves.navy, foreground=Ves.purpleLine, font=self.fontSmall)
+    for name, clr in (('Ok', Ves.ok), ('Err', Ves.err), ('Warn', Ves.warn), ('Info', Ves.info)):
+      st.configure(f'{name}.TLabel', background=Ves.white, foreground=clr, font=self.fontBase)
+    for sup in ('VLAT', 'VTT', 'MISC'):
+      st.configure(
+        f'{sup}.Key.TLabel',
+        background=Ves.purpleBg,
+        foreground=getattr(Ves, f'sup{sup}'),
+        font=self.fontSmall,
+      )
+
+  def _buttons(self) -> None:
+    st = self.style
+    st.configure(
+      'TButton',
+      background=Ves.control,
+      foreground=Ves.ink,
+      bordercolor=Ves.purple,
+      lightcolor=Ves.control,
+      darkcolor=Ves.control,
+      focuscolor=Ves.purple,
+      relief='solid',
+      borderwidth=1,
+      anchor='center',
+      font=self.fontBase,
+      padding=(12, 6),
+    )
+    st.map(
+      'TButton',
+      background=[('disabled', Ves.white), ('pressed', Ves.picked), ('active', Ves.hover)],
+      lightcolor=[('disabled', Ves.white), ('pressed', Ves.picked), ('active', Ves.hover)],
+      darkcolor=[('disabled', Ves.white), ('pressed', Ves.picked), ('active', Ves.hover)],
+      bordercolor=[('disabled', Ves.line)],
+      foreground=[('disabled', Ves.muted)],
+    )
+    # The one action on the window that starts work, so it is the one filled button.
+    st.configure(
+      'Accent.TButton',
+      background=Ves.purple,
+      foreground=Ves.white,
+      bordercolor=Ves.purple,
+      lightcolor=Ves.purple,
+      darkcolor=Ves.purple,
+      padding=(24, 9),
+    )
+    st.map(
+      'Accent.TButton',
+      background=[('disabled', Ves.purpleBg), ('pressed', Ves.navy), ('active', Ves.navy2)],
+      lightcolor=[('disabled', Ves.purpleBg), ('active', Ves.navy2)],
+      darkcolor=[('disabled', Ves.purpleBg), ('active', Ves.navy2)],
+      bordercolor=[('disabled', Ves.purpleLine)],
+      foreground=[('disabled', Ves.muted)],
+    )
+    st.configure('Hdr.TButton', padding=(10, 3), anchor='center', font=self.fontSmall)
+    st.configure('Key.TButton', padding=(10, 3), width=4, anchor='center', font=self.fontSmall)
+    # Schema and layer buttons carry their picked state as a widget state, so choosing
+    # one is a state change rather than a colour written over the widget.
+    st.configure(
+      'Sch.TButton',
+      background=Ves.white,
+      lightcolor=Ves.white,
+      darkcolor=Ves.white,
+      bordercolor=Ves.white,
+      relief='flat',
+      borderwidth=0,
+      padding=(8, 5),
+      anchor='w',
+    )
+    st.map(
+      'Sch.TButton',
+      background=[('selected', Ves.purple), ('active', Ves.hover)],
+      foreground=[('selected', Ves.white)],
+    )
+    # A schema whose layers all come from the one contract is named and picked in that
+    # contract's colour. Mixed schemas keep the plain style above.
+    for sup in ('VLAT', 'VTT', 'MISC'):
+      _clr = getattr(Ves, f'sup{sup}')
+      st.configure(
+        f'{sup}.Sch.TButton',
+        background=Ves.white,
+        lightcolor=Ves.white,
+        darkcolor=Ves.white,
+        bordercolor=Ves.white,
+        foreground=_clr,
+        relief='flat',
+        borderwidth=0,
+        padding=(8, 5),
+        anchor='w',
+      )
+      st.map(
+        f'{sup}.Sch.TButton',
+        background=[('selected', _clr), ('active', Ves.hover)],
+        lightcolor=[('selected', _clr)],
+        darkcolor=[('selected', _clr)],
+        foreground=[('selected', Ves.white)],
+      )
+    for sup in ('VLAT', 'VTT', 'MISC'):
+      st.configure(
+        f'{sup}.Lyr.TButton',
+        background=Ves.white,
+        lightcolor=Ves.white,
+        darkcolor=Ves.white,
+        bordercolor=Ves.white,
+        relief='flat',
+        borderwidth=0,
+        foreground=getattr(Ves, f'sup{sup}'),
+        padding=(8, 4),
+        anchor='w',
+        font=self.fontSmall,
+      )
+      # Picking a layer fills it with the contract colour it is named in, so the
+      # selection says the same thing as the key rather than a purple of its own.
+      st.map(
+        f'{sup}.Lyr.TButton',
+        background=[('selected', getattr(Ves, f'sup{sup}')), ('active', Ves.hover)],
+        lightcolor=[('selected', getattr(Ves, f'sup{sup}'))],
+        darkcolor=[('selected', getattr(Ves, f'sup{sup}'))],
+        foreground=[('selected', Ves.white)],
+      )
+
+  def _inputs(self) -> None:
+    st = self.style
+    st.configure(
+      'TEntry',
+      fieldbackground=Ves.white,
+      bordercolor=Ves.purpleLine,
+      lightcolor=Ves.purpleLine,
+      darkcolor=Ves.purpleLine,
+      foreground=Ves.ink,
+      padding=4,
+    )
+    st.map(
+      'TEntry', fieldbackground=[('disabled', Ves.purpleBg)], foreground=[('disabled', Ves.muted)]
+    )
+    st.configure(
+      'TCombobox', fieldbackground=Ves.white, background=Ves.white, bordercolor=Ves.purpleLine
+    )
+    st.configure(
+      'TCheckbutton',
+      background=Ves.white,
+      foreground=Ves.charcoal,
+      indicatorbackground=Ves.white,
+      indicatorforeground=Ves.purple,
+      indicatormargin=(0, 0, 6, 0),
+      upperbordercolor=Ves.purpleLine,
+      lowerbordercolor=Ves.purpleLine,
+      focuscolor=Ves.white,
+    )
+    st.map(
+      'TCheckbutton',
+      indicatorbackground=[
+        ('disabled', Ves.purpleBg),
+        ('selected', Ves.purple),
+        ('!selected', Ves.white),
+      ],
+      upperbordercolor=[('disabled', Ves.line), ('selected', Ves.purple)],
+      lowerbordercolor=[('disabled', Ves.line), ('selected', Ves.purple)],
+      background=[('active', Ves.white)],
+      foreground=[('disabled', Ves.muted)],
+    )
+    st.configure('Lyr.TCheckbutton', background=Ves.white, padding=0)
+    st.map('Lyr.TCheckbutton', background=[('active', Ves.hover)])
+    # A ticked layer fills its box with the contract colour, so the tick reads against
+    # the key the same way the layer name beside it does.
+    for sup in ('VLAT', 'VTT', 'MISC'):
+      _clr = getattr(Ves, f'sup{sup}')
+      st.configure(f'{sup}.Lyr.TCheckbutton', background=Ves.white, padding=0)
+      st.map(
+        f'{sup}.Lyr.TCheckbutton',
+        background=[('active', Ves.hover)],
+        indicatorbackground=[
+          ('disabled', Ves.purpleBg),
+          ('selected', _clr),
+          ('!selected', Ves.white),
+        ],
+        # The tick is drawn on the filled box, so it is white rather than the mauve it
+        # would inherit, which was near invisible on the two lighter contracts.
+        indicatorforeground=[('selected', Ves.white)],
+        upperbordercolor=[('disabled', Ves.line), ('selected', _clr)],
+        lowerbordercolor=[('disabled', Ves.line), ('selected', _clr)],
+      )
+    st.configure(
+      'TScrollbar',
+      background=Ves.purpleBg,
+      troughcolor=Ves.white,
+      bordercolor=Ves.line,
+      arrowcolor=Ves.muted,
+    )
+    st.configure('TProgressbar', background=Ves.purple, troughcolor=Ves.line, bordercolor=Ves.line)
+
+  def _notebook(self) -> None:
+    st = self.style
+    st.configure('TNotebook', background=Ves.navy, borderwidth=0, tabmargins=(0, 0, 0, 0))
+    st.configure(
+      'TNotebook.Tab',
+      background=Ves.navy,
+      foreground=Ves.purpleLine,
+      padding=(28, 10),
+      borderwidth=0,
+      font=self.fontBase,
+    )
+    st.map(
+      'TNotebook.Tab',
+      background=[('selected', Ves.purple), ('active', Ves.navy2)],
+      foreground=[('selected', Ves.white)],
+      font=[('selected', self.fontBold)],
+    )
+
+  def _table(self) -> None:
+    st = self.style
+    st.configure(
+      'Treeview',
+      background=Ves.white,
+      fieldbackground=Ves.white,
+      foreground=Ves.charcoal,
+      bordercolor=Ves.line,
+      rowheight=22,
+      font=self.fontSmall,
+    )
+    st.map('Treeview', background=[('selected', Ves.purpleBg)], foreground=[('selected', Ves.ink)])
+    st.configure(
+      'Treeview.Heading',
+      background=Ves.purpleBg,
+      foreground=Ves.ink,
+      font=self.fontSmall,
+      relief='flat',
+      padding=4,
+    )
+    st.map('Treeview.Heading', background=[('active', Ves.purpleLine)])
+
+
+class StatusBar(ttk.Frame):
+  # Where the messages go that used to be printed to a terminal the user of a window
+  # never sees.
+  def __init__(self, container: Misc):
+    super().__init__(container, style='Status.TFrame', padding=(12, 6))
+    self.msg = ttk.Label(self, text="Ready", style='Card.TLabel')
+    self.msg.grid(row=0, column=0, sticky='w')
+    self.bar = ttk.Progressbar(self, mode='indeterminate', length=140)
+    self.columnconfigure(0, weight=1)
+
+  def say(self, text: str, kind: str = '') -> None:
+    self.msg.configure(text=text, style=f'{kind}.TLabel' if kind else 'Card.TLabel')
+
+  def busy(self, text: str) -> None:
+    self.say(text, 'Info')
+    self.bar.grid(row=0, column=1, sticky='e', padx=(12, 0))
+    self.bar.start(12)
+
+  def idle(self, text: str, kind: str = '') -> None:
+    self.bar.stop()
+    self.bar.grid_remove()
+    self.say(text, kind)
+
 
 class GuiControl(Tk):
-  def __init__(self, stg):
+  def __init__(self, stg: str):
     super().__init__()
-    # self.overrideredirect(1) # removes window, but loses max/min/close & screen positioning.
 
     self.cfg = Config('config.ini', stg)
     self.qa = QA(self.cfg)
-    self.rights = {} # this is populated by a successful call to API-registration.
+    self.rights: dict[str, Any] = {}
     self.styleMgr = StyMan()
-    
-    ###########################################################################
-    # self.overrideredirect(1) # removes window, loses max/min/close & positioning.
 
-    self.title("Vicmap Load & Replication Service")
-    self.configure(background=StyMan.bgClrFail)
-    self.minsize(630, 855)  # width, height
-    # self.maxsize(495, 590)
-    self.geometry("300x300")  # width x height + x + y
+    # Work handed back from worker threads, run one batch per drain. Tkinter is only
+    # safe to call from the thread that made the window, so this is the way back in.
+    self._uiQueue: queue.Queue[Callable[[], None]] = queue.Queue()
+    self._closing = False
+    # Set while a job that changes data is running, so a second one cannot start.
+    self.busy = False
+
+    self.title("deltaVic")
+    self.configure(background=Ves.purpleBg)
+
+    self._logoBar()
+    self._banner()
 
     self.tabs = ttk.Notebook(self)
-    self.tabs.grid(row=0, column=0, sticky='nsew')
-    # tabs.pack(sticky='nsew')
-    self.columnconfigure(0,weight=1)
-    self.rowconfigure(0,weight=1)
+    self.tabs.grid(row=3, column=0, sticky='nsew')
+    self.columnconfigure(0, weight=1)
+    self.rowconfigure(3, weight=1)
+
+    self.status = StatusBar(self)
+    self.status.grid(row=4, column=0, sticky='ew')
 
     self.frSetup = FrSetup(self.tabs, self)
-    self.tabs.add(self.frSetup, text='VRS Setup & QA')
-    # self.frSetup.test()
-    
+    self.tabs.add(self.frSetup, text=f"{'Setup & QA':^14}")
+
     self.frMeta = FrMetaData(self.tabs, self, 'Meta')
-    self.tabs.add(self.frMeta, text='Meta')
-    
+    self.tabs.add(self.frMeta, text=f"{'Meta':^14}")
+
     self.frData = FrMetaData(self.tabs, self, 'Data')
-    self.tabs.add(self.frData, text='Data')
+    self.tabs.add(self.frData, text=f"{'Data':^14}")
 
-    # self.tabs.add(FrAdmin(self.tabs, self), text='Admin')
+    # What the tabs actually need, now that they exist, rather than a fixed size that
+    # goes stale the next time a widget is added to one of them.
+    self.fitToContent()
 
-  #   self.tabs.bind("<<NotebookTabChanged>>", self.refresh_tab_content)
-  
-  # def refresh_tab_content(self, event): # works, but.
-  #   print(event)
-  #   selected_tab = self.tabs.index(self.tabs.select())
-  #   print(selected_tab)
-  #   if selected_tab == 1:
-  #       self.frMeta.setData() # 5 second pause waiting for full list from APIs
-  #   elif selected_tab == 2:
-  #       self.frData.setData() # quick, but doesn't remark the newly inactive checks.
+    self._drainUi()
+    self.frSetup.regFrm.refreshRights()
 
-  def uploadAllowed(self, lyr, upldType=None): # upldType prevents overlogging whent he buttons havn't been pressed.
-    # NB: checking these right here is just for display purposes, they are rechecked on submission on the server side of the API.
+  def _logoBar(self) -> None:
+    bar = ttk.Frame(self, style='Logo.TFrame', padding=(20, 6))
+    bar.grid(row=0, column=0, sticky='ew')
+    bar.columnconfigure(1, weight=1)
+    # Held on the instance because tkinter keeps no reference of its own and a
+    # collected image leaves an empty box behind.
+    self.imgVicmap = self._logo('vicmap-logo.png')
+    self.imgVicgov = self._logo('vicgov-logo.png')
+    if self.imgVicmap:
+      ttk.Label(bar, image=self.imgVicmap, style='Card.TLabel').grid(row=0, column=0, sticky='w')
+    if self.imgVicgov:
+      ttk.Label(bar, image=self.imgVicgov, style='Card.TLabel').grid(row=0, column=2, sticky='e')
+    ttk.Frame(self, style='Rule.TFrame', height=3).grid(row=1, column=0, sticky='ew')
+
+  # Stored at the size they are drawn, so tkinter never has to scale them. Sources are
+  # ves_frontend/src/assets in the VES repository.
+  def _logo(self, name: str) -> PhotoImage | None:
+    try:
+      return PhotoImage(file=IMG / name)
+    except Exception as ex:
+      logging.warning(f"Could not load {name}: {ex}")
+      return None
+
+  def _banner(self) -> None:
+    ban = ttk.Frame(self, style='Banner.TFrame', padding=(20, 10))
+    ban.grid(row=2, column=0, sticky='ew')
+    ban.columnconfigure(0, weight=1)
+    ttk.Label(ban, text="deltaVic", style='Title.TLabel').grid(row=0, column=0, sticky='w')
+    ttk.Label(ban, text="Vicmap layers replicated to your local database", style='Sub.TLabel').grid(
+      row=1, column=0, sticky='w', pady=(2, 0)
+    )
+
+  # Grows the window into whatever a tab has come to need. The minimum only ever goes
+  # up, so a pane that shrinks again cannot make the window jump about.
+  def fitToContent(self) -> None:
+    self.update_idletasks()
+    _w, _h = self.minsize()
+    self.minsize(max(_w, self.winfo_reqwidth()), max(_h, self.winfo_reqheight()))
+
+  # Runs work on a worker thread, then hands its result, or the exception it raised,
+  # to done back on the ui thread. Nothing in work may touch a widget.
+  def runAsync(
+    self, work: Callable[[], Any], done: Callable[[Any, Exception | None], None]
+  ) -> None:
+    def wrapper() -> None:
+      result: Any = None
+      err: Exception | None = None
+      try:
+        result = work()
+      except Exception as ex:
+        err = ex
+        logging.error(traceback.format_exc())
+      self.uiCall(lambda: done(result, err))
+
+    threading.Thread(target=wrapper, daemon=True).start()
+
+  # Queue a callable to run on the ui thread. Safe to call from any thread.
+  def uiCall(self, fn: Callable[[], None]) -> None:
+    self._uiQueue.put(fn)
+
+  def _drainUi(self) -> None:
+    while True:
+      try:
+        fn = self._uiQueue.get_nowait()
+      except queue.Empty:
+        break
+      try:
+        fn()
+      except Exception:
+        logging.error(traceback.format_exc())
+    if not self._closing:
+      self.after(100, self._drainUi)
+
+  def destroy(self) -> None:
+    # Stops the drain rescheduling itself onto a window that is going away.
+    self._closing = True
+    super().destroy()
+
+  # The reason there is no write on this layer, or None when there is.
+  def uploadBlocked(self, lyr: LyrReg) -> str | None:
     if not self.rights:
-      if upldType: print("GUI's got no rights. You need to refresh the registration form.")
+      return "No rights held. Refresh the registration on the setup tab."
+    if lyr.sup in ('VLAT', 'VTT'):
+      return f"{lyr.sup} is an external maintenance contract, so only MISC can be uploaded."
+    if (
+      any(lyr.identity.startswith(s) for s in self.rights['schemas']['allow']['write'])
+      and lyr.identity not in self.rights['datasets']['deny']['write']
+    ) or lyr.identity in self.rights['datasets']['allow']['write']:
+      return None
+    return f"Your registration carries no write rights on {lyr.sch}."
+
+  def uploadAllowed(self, lyr: LyrReg, upldType: str | None = None) -> bool:
+    # Checked here for display only. The server checks all of it again on submission.
+    if not self.rights:
+      if upldType:
+        self.status.idle("No rights held. Refresh the registration on the setup tab.", 'Warn')
       return False
-    elif lyr.sup in ('VLAT','VTT'): # only MISC allowed
-      if upldType: print("Only MISC datasets (brown) can be updated. VLAT (green) and VTT (blue) are external maintanance contracts.")
+    if lyr.sup in ('VLAT', 'VTT'):  # only MISC allowed
+      if upldType:
+        self.status.idle(
+          "Only MISC datasets can be updated. VLAT and VTT are external contracts.", 'Warn'
+        )
       return False
-    
-    if any(lyr.identity.startswith(s) for s in self.rights['schemas']['allow']['write']) and not lyr.identity in self.rights['datasets']['deny']['write']:
-      # print(f"validated: schema and not dataset.")
+
+    if (
+      any(lyr.identity.startswith(s) for s in self.rights['schemas']['allow']['write'])
+      and lyr.identity not in self.rights['datasets']['deny']['write']
+    ):
       return True
     if lyr.identity in self.rights['datasets']['allow']['write']:
-      # print(f"validated: dataset. {lyr.identity in self.rights['datasets']['allow']['write']}")
       return True
-    
-    if upldType: print("default no rights")
-    return False # default.
 
-###########################################################################
-###########################################################################
+    if upldType:
+      self.status.idle(f"No rights to write {lyr.identity}.", 'Warn')
+    return False
+
+
 class FrMetaData(ttk.Frame):
-  def __init__(self, container, guic, type):
-    super().__init__(container, style="bad.TFrame")#"bad.TFrame")#
+  def __init__(self, container: Misc, guic: GuiControl, type: str):
+    super().__init__(container, padding=12)
     self.guic = guic
-    self.type = type # is it remote ('Meta') or local ('Data')
-    self.schDepth = 0
-    self.data = Schemas(self.type, self.guic.cfg)
-    
-    # heading = Label(self, text='Data Content, Status and Metadata', bg=StyMan.bgClrPass)
-    # heading.grid(row=0, column=0, columnspan=2, padx=5, pady=5, sticky="W")
-    # self.ctrlFr = self.mkCtrlFr()
-    # self.ctrlFr.grid(row=0, column=0, columnspan=2, padx=5, pady=5, sticky='nsew') #
-    
-    self.schFr = SubFrMetaSchs(self, guic, self.data) # self.mkSchFr() # 
-    self.schFr.grid(row=1, column=0, padx=5, pady=5, sticky='W')#columnspan=2, 
-    
-    self.lyrFr = SubFrMetaLyrs(self, guic, self.data) # self.mkLyrFr() # 
-    self.lyrFr.grid(row=1, column=1, padx=5, pady=5, sticky='nsew')#columnspan=2, 
-    self.grid_columnconfigure(1, weight=1)
+    self.type = type  # is it remote ('Meta') or local ('Data')
+    self.data = Schemas(self.type, self.guic.cfg, load=False)
+    self.inflight = False  # a layer list is already on its way
+
+    self.schFr = SubFrMetaSchs(self, guic, self.data)
+    self.schFr.grid(row=0, column=0, padx=(0, 10), sticky='nsew')
+
+    self.lyrFr = SubFrMetaLyrs(self, guic, self.data)
+    self.lyrFr.grid(row=0, column=1, sticky='nsew')
 
     self.lyrInfoFr = SubFrMetaLyrInfo(self, guic)
-    self.lyrInfoFr.grid(row=2, column=0, columnspan=4, padx=10, pady=10, sticky="nsew")
-    self.rowconfigure(2, weight=1)
+    self.lyrInfoFr.grid(row=1, column=0, columnspan=2, pady=(10, 0), sticky='nsew')
 
-    # self.columnconfigure(1, weight=1)
-    # self.rowconfigure(1)#, weight=1)
-    # self.columnconfigure(0, weight=1)
-    # self.rowconfigure(0)#, weight=1)
+    self.columnconfigure(1, weight=1)
+    self.rowconfigure(0, weight=1)
+    self.rowconfigure(1, weight=1)
 
-  def setData(self):
-    data = Schemas(self.type, self.guic.cfg)
-    print([sch.name for sch in data.schs])
+    self.setData()
+
+  def setData(self) -> None:
+    # The tab asks for its list when it is built, and the registration check asks
+    # again when rights come back. One request in flight is enough.
+    if self.inflight:
+      return
+    self.inflight = True
+    # The meta list is an api call and takes a few seconds, so the tab says what it is
+    # waiting on rather than sitting empty and looking broken.
+    self.schFr.waiting("Loading ...")
+    self.guic.runAsync(lambda: Schemas(self.type, self.guic.cfg), self._setDataDone)
+
+  def _setDataDone(self, data: Schemas | None, err: Exception | None) -> None:
+    self.inflight = False
+    if err or not data:
+      self.schFr.waiting("Unavailable")
+      self.guic.status.idle(f"Could not read the {self.type} layer list: {err}", 'Err')
+      return
+    self.data = data
+    _open = self.schFr.selectedName()
     self.schFr.setData(data)
     self.lyrFr.setData(data)
-    print(len(data.schs))
-  
-  ###########################################################################
-  def mkCtrlFr(self):
-    _fr = Frame(self, borderwidth=1, relief="raised", bg=StyMan.bgClrPass)
-    self.remoteBtn = Button(_fr, text='REMOTE', font=(72), padx=30, relief="solid", background=StyMan.qaClrFail, command=self.showLocal)
-    self.remoteBtn.grid(row=0, column=1, padx=5, pady=5, sticky="E")
-    # self.remoteBtn.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
-    self.localBtn = Button(_fr, text='LOCAL', font=(72), padx=30, relief="solid", background=StyMan.qaClrFail, command=self.showRemote)
-    self.localBtn.grid(row=0, column=2, padx=5, pady=5, sticky="W")
-    # [_fr.columnconfigure(ii, uniform='equal_columns', weight=0) for ii in range(2)]
-    _fr.columnconfigure((0,4), weight=1)
-    return _fr
-    
-  ###########################################################################
-  ###########################################################################
-  def mkLyrFr(self):
-    _fr = Frame(self, borderwidth=1, relief="raised", bg=StyMan.bgClrPass)
-    _schHdr = Label(_fr, text="Layers", bg=StyMan.bgClrPass, font='bold')
-    _schHdr.grid(row=0, column=0, sticky='nsew')
-    return _fr
+    if _open and _open in self.schFr.schBtns:
+      self.schFr.showSch(_open)
 
-  ###########################################################################
-  ###########################################################################
-  
-class SubFrMeta(Frame):
-  def __init__(self, owner, guic):
-    if self.__class__.__name__ == 'SubFrMetaLyrInfo':
-      super().__init__(owner, borderwidth=5, padx=5, pady=5, relief="sunken", bg=StyMan.bgClrData)
-    else:
-      super().__init__(owner, borderwidth=1, padx=5, pady=5, relief="raised", bg=StyMan.bgClrPass)
-    self.bgClr = StringVar(value=StyMan.bgClrPass)
-    self.guic = guic
-    
-class SubFrMetaSchs(SubFrMeta):
-  def __init__(self, owner, guic, data):
-    super().__init__(owner, guic)
-    
+
+class Card(ttk.Frame):
+  # A titled white panel. Every block of content on the window is one of these.
+  def __init__(self, owner: Misc, title: str = ''):
+    super().__init__(owner, style='Card.TFrame', padding=12)
+    self.row = 0
+    if title:
+      ttk.Label(self, text=title, style='Head.TLabel').grid(
+        row=0, column=0, columnspan=6, sticky='w', pady=(0, 8)
+      )
+      self.row = 1
+
+
+class SubFrMetaSchs(Card):
+  def __init__(self, owner: FrMetaData, guic: GuiControl, data: Schemas):
+    super().__init__(owner, 'Schemas')
     self.owner = owner
-    self.selected = None # currently selected schema
-
-    """ HEADER """
-    _schHdr = Label(self, text="Schemas", bg=StyMan.bgClrPass, font='bold')
-    _schHdr.grid(row=0, column=0, columnspan=2, sticky='nsew')
-    """ SCHEMAS """
+    self.guic = guic
+    self.selected: ttk.Button | None = None
+    self.schBtns: dict[str, ttk.Button] = {}
+    self.schs: list[Schema] = []
+    self.note: ttk.Label | None = None
     self.setData(data)
 
-  def setData(self, data):
-    self.schs = data.schs
-    
-    _schCnt = len(self.schs)
-    _nrCols = 2; _nrItems = math.ceil(_schCnt/_nrCols)
-    for ii in range(_schCnt):
-      _row = 1+(ii%_nrItems); _col = int(ii/_nrItems)
-      self.mkSchBtn(self.schs[ii].name, _row, _col)
-    self.schDepth = _nrItems
-  
-  def mkSchBtn(self, sch, row, col):
-    setattr(self, f"btn{sch}", Button(self, textvariable=StringVar(value=sch), width=8, height=1, padx=1, relief="solid", background=StyMan.qaClrFail))
-    getattr(self, f"btn{sch}").config(command=lambda:self.showSch(f"{sch}"))
-    getattr(self, f"btn{sch}").grid(row=row, column=col, sticky="W", padx=5)#, pady=(2,0))
-  
-  def showSch(self, sch):
-    # change the schema button colours
-    if self.selected:
-      self.selected.config(background=StyMan.qaClrFail)
-    self.selected = getattr(self, f"btn{sch}")
-    self.selected.config(background=StyMan.qaClrPass)
+  # Stands in for the schema buttons until there are some to draw.
+  def waiting(self, text: str) -> None:
+    if not self.note:
+      self.note = ttk.Label(self, style='Muted.TLabel')
+      self.note.grid(row=self.row, column=0, columnspan=2, sticky='w', padx=2, pady=2)
+    self.note.configure(text=text)
 
+  def setData(self, data: Schemas) -> None:
+    if self.note:
+      self.note.destroy()
+      self.note = None
+    [btn.destroy() for btn in self.schBtns.values()]
+    self.schBtns = {}
+    self.selected = None
+    self.schs = data.schs
+
+    _nrCols = 2
+    _nrItems = math.ceil(len(self.schs) / _nrCols) or 1
+    for ii, sch in enumerate(self.schs):
+      self.mkSchBtn(sch.name, self.row + (ii % _nrItems), int(ii / _nrItems), self.supOf(sch))
+
+  # The contract most of the schema's layers belong to. Only about half of them are pure,
+  # so the majority names the schema and the layer names inside carry the exceptions.
+  # A tie goes to the contract listed first in the key.
+  @staticmethod
+  def supOf(sch: Schema) -> str | None:
+    _sups = [lyr.sup for lyr in sch.lyrs if lyr.sup in ('VLAT', 'VTT', 'MISC')]
+    return max(('VLAT', 'VTT', 'MISC'), key=_sups.count) if _sups else None
+
+  def mkSchBtn(self, sch: str, row: int, col: int, sup: str | None = None) -> None:
+    _style = f'{sup}.Sch.TButton' if sup in ('VLAT', 'VTT', 'MISC') else 'Sch.TButton'
+    btn = ttk.Button(self, text=sch, style=_style, command=lambda: self.showSch(sch))
+    btn.grid(row=row, column=col, sticky='ew', padx=2, pady=1)
+    self.schBtns[sch] = btn
+
+  def selectedName(self) -> str | None:
+    return str(self.selected['text']) if self.selected else None
+
+  def showSch(self, sch: str) -> None:
+    if self.selected:
+      self.selected.state(['!selected'])
+    self.selected = self.schBtns[sch]
+    self.selected.state(['selected'])
     self.owner.lyrFr.redrawCanvas(sch)
 
-class SubFrMetaLyrs(SubFrMeta):
-  def __init__(self, owner, guic, data):
-    super().__init__(owner, guic)
+
+class SubFrMetaLyrs(Card):
+  def __init__(self, owner: FrMetaData, guic: GuiControl, data: Schemas):
+    super().__init__(owner)
     self.data = data
     self.owner = owner
+    self.guic = guic
+    self.nrLyrs = 0
 
-    # super().__init__(owner, width=400, height=300, background='red')
     self.lyrHdrStr = StringVar(self, "Layers")
-    self.lyrHdr = Label(self, text="Layers", bg=StyMan.bgClrPass, font='bold', textvariable=self.lyrHdrStr)
-    self.lyrHdr.grid(row=0, column=0, sticky='ew')
+    ttk.Label(self, textvariable=self.lyrHdrStr, style='Head.TLabel').grid(
+      row=0, column=0, sticky='w', pady=(0, 8)
+    )
+    ttk.Button(self, text="Key", style='Key.TButton', command=self.toggleKey).grid(
+      row=0, column=1, sticky='w', padx=(10, 0), pady=(0, 8)
+    )
     if self.owner.type == "Meta":
-      self.btnSchOn = Button(self, text="All ON", padx=10, background=StyMan.qaClrPass, anchor='e', command=lambda:self.toggleActive(sch=self.owner.schFr.selected["text"], active=True))
-      self.btnSchOn.grid(row=0, column=1, sticky='e')
-      self.btnSchOff = Button(self, text="All OFF", padx=10, background=StyMan.qaClrFail, anchor='e', command=lambda:self.toggleActive(sch=self.owner.schFr.selected["text"], active=False))
-      self.btnSchOff.grid(row=0, column=2, sticky='e')
-      self.grid_columnconfigure(0, weight=1)
+      ttk.Button(
+        self,
+        text="All on",
+        style='Hdr.TButton',
+        command=lambda: self.toggleActive(sch=self.owner.schFr.selectedName(), active=True),
+      ).grid(row=0, column=3, sticky='e', padx=(6, 0), pady=(0, 8))
+      ttk.Button(
+        self,
+        text="All off",
+        style='Hdr.TButton',
+        command=lambda: self.toggleActive(sch=self.owner.schFr.selectedName(), active=False),
+      ).grid(row=0, column=4, sticky='e', padx=(6, 0), pady=(0, 8))
 
-    self.canvas = Canvas(self, width=415, background=StyMan.bgClrPass)
-    self.canvas.bind('<Enter>', lambda e: self.canvas.bind_all("<MouseWheel>", self._on_lyr_mousewheel))
-    self.canvas.bind('<Leave>', lambda e: self.canvas.unbind_all("<MouseWheel>"))
-    
-    self.lyrFrame = ttk.Frame(self.canvas, padding=(5,5), style='bad.TFrame')#, width=50)
-    self.lyrFrame.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
-    self.canvas.create_window((0,0), window=self.lyrFrame, anchor="nw")
-    self.canvas.grid(row=1, column=0, columnspan=3, sticky="nsew")#rowspan=self.schDepth+1, 
-    
-    self.lyrScrollbar = Scrollbar(self, orient="vertical", command=self.canvas.yview)
-    self.lyrScrollbar.grid(row=1, column=4, sticky="ns")
-    
-    # self.guic = guic 
-    self.lyrBtns, self.lyrChks , self.lyrVars = [], [], []
-    self.selected = None # currently selected schema
+    # The colours a layer name is drawn in, which mean nothing until they are named.
+    self.key = ttk.Frame(self, style='Key.TFrame', padding=8)
+    for ii, (sup, what) in enumerate(
+      (
+        ('VLAT', 'VLAT, address and property contract'),
+        ('VTT', 'VTT, topographic contract'),
+        ('MISC', 'MISC, maintained in house and uploadable'),
+      )
+    ):
+      ttk.Label(self.key, text='\u25a0', style=f'{sup}.Key.TLabel').grid(row=ii, column=0)
+      ttk.Label(self.key, text=what, style='KeyText.TLabel').grid(
+        row=ii, column=1, sticky='w', padx=(6, 0)
+      )
 
-    self.redrawCanvas()
-    
-    # self.columnconfigure(1, weight=1)
-    # self.rowconfigure(1)#, weight=1)
-    # self.columnconfigure(0, weight=1)
-    # self.rowconfigure(0)#, weight=1)
-    
-  def _on_lyr_mousewheel(self, event):
-    self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+    self.columnconfigure(2, weight=1)  # the gap that holds the actions out to the right
+    self.rowconfigure(2, weight=1)
 
-  def setData(self, data):
+    self.canvas = Canvas(self, width=415, background=Ves.white, highlightthickness=0, bd=0)
+    # X11 reports the wheel as buttons 4 and 5, everywhere else as <MouseWheel>. The
+    # bindings are global because the pointer is over a layer button rather than the
+    # canvas for most of the list, and the handler works out whether this list is under it.
+    for _seq in ('<MouseWheel>', '<Button-4>', '<Button-5>'):
+      self.canvas.bind_all(_seq, self._onWheel, add='+')
+
+    self.lyrFrame = ttk.Frame(self.canvas, style='Card.TFrame', padding=2)
+    self.lyrFrame.bind(
+      "<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+    )
+    self.canvasWin = self.canvas.create_window((0, 0), window=self.lyrFrame, anchor="nw")
+    # A canvas item keeps its own width, so widening the window has to widen it too.
+    self.canvas.bind(
+      '<Configure>', lambda e: self.canvas.itemconfigure(self.canvasWin, width=e.width)
+    )
+    self.canvas.grid(row=2, column=0, columnspan=5, sticky="nsew")
+
+    self.lyrScrollbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    self.lyrScrollbar.grid(row=2, column=5, sticky="ns")
+    # Until the canvas has reported a position the scrollbar answers with the four
+    # value protocol, and the wheel over one of those calls yview with a bare number.
+    self.canvas.configure(yscrollcommand=self.lyrScrollbar.set)
+    self.lyrScrollbar.set(0.0, 1.0)
+
+    self.lyrBtns: dict[str, ttk.Button] = {}
+    self.lyrChks: dict[str, ttk.Checkbutton] = {}
+    self.lyrVars: dict[str, IntVar] = {}
+    self.selected: ttk.Button | None = None
+
+  def toggleKey(self) -> None:
+    if self.key.winfo_ismapped():
+      self.key.grid_remove()
+    else:
+      self.key.grid(row=1, column=0, columnspan=6, sticky='w', pady=(2, 8))
+
+  # Scrolls this layer list, but only while the pointer is somewhere inside it. Both
+  # tabs build one of these and both are bound, so each asks before it acts.
+  def _onWheel(self, event: Any) -> None:
+    _under = self.winfo_containing(event.x_root, event.y_root)
+    if not _under or not str(_under).startswith(str(self.canvas)):
+      return
+    if event.num in (4, 5):  # x11
+      _step = -1 if event.num == 4 else 1
+    else:
+      _step = int(-event.delta / 120) or (-1 if event.delta > 0 else 1)
+    self.canvas.yview_scroll(_step, "units")
+
+  def setData(self, data: Schemas) -> None:
     self.data = data
+    self.clearCanvas()
 
-  def redrawCanvas(self, newSch=None):
-    # print("reDraw")
-    if not newSch: return
-    
-     # clear current controls
-    [lyrBtn.destroy() for lyrBtn in self.lyrBtns]
-    [lyrChk.destroy() for lyrChk in self.lyrChks]
-    # [lyrVar.destroy() for lyrVar in self.lyrVars]
-    
-    self.lyrBtns, self.lyrChks = [], []
+  def clearCanvas(self) -> None:
+    [w.destroy() for w in self.lyrBtns.values()]
+    [w.destroy() for w in self.lyrChks.values()]
+    self.lyrBtns, self.lyrChks, self.lyrVars = {}, {}, {}
+    self.selected = None
+    self.lyrHdrStr.set("Layers")
 
-    _sch = self.data.get(newSch)
+  def redrawCanvas(self, newSch: str | None = None) -> None:
+    if not newSch:
+      return
+    self.clearCanvas()
+
+    if not (_sch := self.data.get(newSch)):
+      return
     self.nrLyrs = len(_sch.lyrs)
     self.lyrHdrStr.set(f"Layers ({self.nrLyrs})")
-    # _lyrs = [d.tbl for d in _sch.lyrs]
-    _sch.lyrs.sort(key = lambda lyr:lyr.identity)
+    _sch.lyrs.sort(key=lambda lyr: lyr.identity)
     self.setLyrs(_sch.lyrs)
-    # self.update_idletasks()
-    self.canvas.configure(yscrollcommand=self.lyrScrollbar.set)
-    
-  def setLyrs(self, lyrs):
-    self.selected = None
-    [self.mkLyrBtn(lyr, lyrs.index(lyr)) for lyr in lyrs]#, 0
-    # self.columnconfigure((0,2), 1)
-    [self.lyrFrame.columnconfigure(ii, uniform='equal_columns', weight=1) for ii in (0,2)]#range(2)]
-    
-  def mkLyrBtn(self, lyr, idx):#, col):
-    # print(f"mkLyrBtn({self}, {lyr}, {rowNum}, {col})")
-    _cols=2
-    rowNum, colNum = int(idx/_cols)%self.nrLyrs, idx%_cols
-    # print(f"({rowNum}, {colNum*_cols}) ({rowNum}, {(colNum*_cols)+1})")
-    
-    fgCol = getattr(StyMan, f"sup{lyr.sup}")
-    setattr(self, f"lyrBtn{lyr.identity}", Button(self.lyrFrame, text=lyr.tbl, padx=10, background="snow3", anchor='w', fg=fgCol, command=lambda:self.showLyrDetails(lyr)))
-    getattr(self, f"lyrBtn{lyr.identity}").grid(row=rowNum, column=(colNum*_cols)+1, sticky="nsew", padx=(0,3), pady=1)
-    self.lyrBtns.append(getattr(self, f"lyrBtn{lyr.identity}"))
+
+  def setLyrs(self, lyrs: list[LyrReg]) -> None:
+    [self.mkLyrBtn(lyr, idx) for idx, lyr in enumerate(lyrs)]
+    [self.lyrFrame.columnconfigure(ii, uniform='equal_columns', weight=1) for ii in (1, 3)]
+
+  def mkLyrBtn(self, lyr: LyrReg, idx: int) -> None:
+    _cols = 2
+    rowNum, colNum = int(idx / _cols), idx % _cols
+
+    btn = ttk.Button(
+      self.lyrFrame,
+      text=lyr.tbl,
+      style=f'{lyr.sup}.Lyr.TButton',
+      command=lambda: self.showLyrDetails(lyr),
+    )
+    btn.grid(row=rowNum, column=(colNum * _cols) + 1, sticky="ew", padx=(0, 4), pady=1)
+    self.lyrBtns[lyr.identity] = btn
 
     if self.owner.type == "Meta":
-      setattr(self, f"lyrAct{lyr.identity}", IntVar(value=1 if lyr.active else 0))
-      setattr(self, f"lyrChk{lyr.identity}", Checkbutton(self.lyrFrame, variable=getattr(self, f"lyrAct{lyr.identity}"), onvalue=1, offvalue=0, bg=fgCol, command=lambda:self.toggleActive(lyr=lyr)))
-      getattr(self, f"lyrChk{lyr.identity}").grid(row=rowNum, column=colNum*_cols, sticky="E", padx=(3,0), pady=1)
-      if self.guic.cfg.get('dbComplete')!="True":
-        getattr(self, f"lyrChk{lyr.identity}").config(state="disabled")
-      self.lyrChks.append(getattr(self, f"lyrChk{lyr.identity}"))
-      self.lyrVars.append(getattr(self, f"lyrAct{lyr.identity}"))
-      
-  def showLyrDetails(self, lyr):
+      var = IntVar(value=1 if lyr.active else 0)
+      chk = ttk.Checkbutton(
+        self.lyrFrame,
+        variable=var,
+        onvalue=1,
+        offvalue=0,
+        style=f'{lyr.sup}.Lyr.TCheckbutton',
+        command=lambda: self.toggleActive(lyr=lyr),
+      )
+      chk.grid(row=rowNum, column=colNum * _cols, sticky="e", padx=(4, 0), pady=1)
+      if self.guic.cfg.get('dbComplete') != "True":
+        chk.configure(state="disabled")
+      self.lyrChks[lyr.identity] = chk
+      self.lyrVars[lyr.identity] = var
+
+  def showLyrDetails(self, lyr: LyrReg) -> None:
     if self.selected:
-      self.selected.config(background="snow3")
-    self.selected = getattr(self, f"lyrBtn{lyr.identity}")
-    self.selected.config(background=StyMan.bgClrData)
-    
+      self.selected.state(['!selected'])
+    self.selected = self.lyrBtns[lyr.identity]
+    self.selected.state(['selected'])
     self.owner.lyrInfoFr.showLyrDetails(lyr)
-  
-  def toggleActive(self, lyr=None, sch=None, active=None):
+
+  def toggleActive(
+    self, lyr: LyrReg | None = None, sch: str | None = None, active: bool | None = None
+  ) -> None:
     _db = DB(self.guic.cfg)
-    if lyr:
-      active = bool(getattr(self, f"lyrAct{lyr.identity}").get())
-      _db.execute(*lyr.setActive(active))
-    if sch:
-      sqlStr = f"update vm_meta.data set active={str(active).lower()} where identity like '{sch}%'"
-      _db.execute(sqlStr)
-      [lyrVar.set(active) for lyrVar in self.lyrVars]
+    try:
+      if lyr:
+        active = bool(self.lyrVars[lyr.identity].get())
+        _db.execute(*lyr.setActive(active))
+      if sch and (_sch := self.data.get(sch)):
+        _db.execute(
+          "update vm_meta.data set active=%s where split_part(identity, '.', 1)=%s",
+          (bool(active), sch),
+        )
+        for _lyr in _sch.lyrs:
+          _lyr.active = bool(active)
+        [var.set(bool(active)) for var in self.lyrVars.values()]
+        self.guic.status.idle(f"{sch}: all layers {'on' if active else 'off'}", 'Ok')
+    finally:
+      _db.close()
 
-class SubFrMetaLyrInfo(SubFrMeta):
-  def __init__(self, owner, guic):
-    super().__init__(owner, guic)
+
+class SubFrMetaLyrInfo(Card):
+  def __init__(self, owner: FrMetaData, guic: GuiControl):
+    super().__init__(owner)
     self.owner = owner
-    self.lyrMeta = None
+    self.guic = guic
+    self.lyrMeta: dict[str, Any] | None = None
+    # The layer whose details were last asked for, used to drop stale answers.
+    self.pendingLyr: LyrReg | None = None
+    self.relBox: ttk.Combobox
+    self.gtBox: ttk.Combobox
+    self.mdUUID: StringVar
+    self.vdp: IntVar
+    ttk.Label(self, text="Pick a layer to see its details", style='Muted.TLabel').grid(
+      row=0, column=0, padx=4, pady=4
+    )
 
-  def showLyrDetails(self, lyr):
-    # print(f"{lyr}")
-    
-    # clear frame
+  def showLyrDetails(self, lyr: LyrReg) -> None:
+    # The metadata is an api call, so it is fetched off the ui thread and the frame is
+    # drawn when it lands. The layer asked for is remembered so a slow answer for an
+    # earlier click cannot draw over a later one.
+    self.pendingLyr = lyr
+    for widget in self.winfo_children():
+      widget.destroy()
+    ttk.Label(self, text=f"Loading {lyr.identity} ...", style='Muted.TLabel').grid(
+      row=0, column=0, padx=4, pady=4
+    )
+    self.guic.runAsync(
+      lambda: self.getLyrMetadata(lyr.identity),
+      lambda meta, err: self._lyrMetaDone(lyr, meta, err),
+    )
+
+  def _lyrMetaDone(self, lyr: LyrReg, meta: dict[str, Any] | None, err: Exception | None) -> None:
+    if self.pendingLyr is not lyr:  # a later click has already asked for something else
+      return
+    if err:
+      logging.warning(err)
+    self.lyrMeta = meta
+    self.renderLyrDetails(lyr)
+
+  def renderLyrDetails(self, lyr: LyrReg) -> None:
     for widget in self.winfo_children():
       widget.destroy()
 
-    self.lyrMeta = self.getLyrMetadata(lyr.identity)
+    ttk.Label(self, text=lyr.identity, style='Head.TLabel').grid(
+      row=0, column=0, columnspan=3, sticky='w', pady=(0, 8)
+    )
+    _bar = ttk.Frame(self, style='Plain.TFrame')
+    _bar.grid(row=0, column=4, sticky='e')
+    self.columnconfigure(3, weight=1)  # the gap that holds the bar out to the right
 
-    _frIdent = Frame(self, borderwidth=2, relief="raised", bg=StyMan.bgClrPass)
-    Label(_frIdent, text=lyr.identity, background=StyMan.bgClrPass, font='bold').grid(row=0, column=0, padx=10, pady=5)#, textvariable=self.lyrNameStr)
-    _frIdent.grid(row=0, column=0, columnspan=2, sticky='W')
-    # ttk.Label(self, text=lyr.identity, border=0).grid(row=0, column=0, padx=10)
-
-    if self.owner.type == "Meta": # all records here should have vicmap metadata from the APIs.
-      _frActions = Frame(self, borderwidth=2, bg=StyMan.bgClrData)
-      layerReseed = Button(_frActions, text="Reseed", padx=5, pady=2, background="snow3", bg=StyMan.qaClrPass, command=lambda:self.reseed(lyr.identity)) #anchor='e', 
-      layerReseed.grid(row=0, column=0, padx=(0.10), sticky='W')
-      layerMetaLink = Button(_frActions, text="Metadata weblink (GeoNetwork ISO 19115)", padx=5, pady=2, background="snow3", anchor='e', bg=StyMan.qaClrPass, command=lambda:webbrowser.open_new(self.lyrMeta['metadata']))#self.geonet(self.lyrMeta)) 
-      layerMetaLink.grid(row=0, column=1, padx=(10.0), sticky='E') #padx=(5.5), 
-      _frActions.grid(row=0, column=3, columnspan=4)#, sticky='EW')
     if self.owner.type == "Data":
-      print(lyr)
-      _frUpload = self.mkFrUpload(lyr)
-      _frUpload.grid(row=0, column=3, columnspan=4, sticky='e')
-    
-    if self.lyrMeta: # existing layer
-      ## Table Columns
-      _colData = [(col,type) for col,type in self.lyrMeta['columns'].items()] if self.lyrMeta['columns'] else []
-      _colcols = [('Column',120,'e'),('Type',120,'w')]
-      _cols = TView(self, 'Columns', _colcols, 1, 0, _colData)
-      ## Table Indexes
-      _idxData = [(idx[1],idx[0],idx[2]) for idx in self.lyrMeta['indexes']] if self.lyrMeta['indexes'] else []
-      _idxCols = [('Column',120,'w'),('idx_Name',120,'w'),('Type',50,'w')]
-      _idxs = TView(self, 'Indexes', _idxCols, 1, 3, _idxData)
-      ## Dump History Tree
-      _ldData = [(dump[2], dump[1], datetime.fromisoformat(dump[3]).strftime('%d/%m/%Y %H:%M'),dump[4],dump[5],dump[6]) for dump in self.lyrMeta['pgDumps']] if self.lyrMeta['pgDumps'] else []
-      _ldData.sort(key = lambda x:datetime.strptime(x[2], "%d/%m/%Y %H:%M"), reverse=True)
-      _ldCols = [('Supply Version',50,'w'),('Type',50,'w'),('Date',100,'w'),('Adds',80,'e'),('Dels',80,'e'),('Count',80,'e')]
-      _loads = TView(self, 'Update History', _ldCols, 3, 0, _ldData, 7) #'Type':75,
-    else: # new layer
-      self.mkNewUplFrm()
-      
-  def mkNewUplFrm(self):
-    Label(self, text='Upload New Dataset', border=3).grid(row=1, column=0, padx=10, sticky='EW')
-    # (self, fr, bgClr, var, name, val, wid, row, col, colspan=1, private=False):
-    # (self, self.bgClr, 'email', 'email', _valEmail, 60, 1, 0, 3)
+      self.mkFrUpload(_bar, lyr)
+      self.mkUploadPane(lyr)
+      self.guic.fitToContent()
+      return
 
-    self.relation = StringVar()
-    _lbl = Label(self, text='Relation:', background = StyMan.bgClrData)
-    _lbl.grid(row=2, column=0, sticky="E")
-    # Label(self, text='datasets:').grid(row=1, column=4, sticky="E")
-    self.relBox = ttk.Combobox(self, values=['table','view'])
-    self.relBox.current(0)
-    self.relBox.grid(row=2, column=1, sticky="W")
-    # self.relBox.bind("<<ComboboxSelected>>", self.profileChanged)
-    # self.relBox.bind("<Return>",self.profileChanged)
-    
-    self.mdUUID = StringVar()
-    Label(self, text='GeoNetwork UUID:', background = StyMan.bgClrData).grid(row=3, column=0, sticky='E')
-    self.uuidEnt = Entry(self, textvariable=self.mdUUID, width=40, bd=3).grid(row=3, column=1, sticky='W')
+    self.columnconfigure(0, weight=1, uniform='panes')
+    self.columnconfigure(3, weight=1, uniform='panes')
+    ttk.Button(_bar, text="Reseed", command=lambda: self.reseed(lyr.identity)).grid(
+      row=0, column=0, padx=(0, 6)
+    )
+    ttk.Button(
+      _bar, text="Metadata weblink (GeoNetwork ISO 19115)", command=self.openMetaLink
+    ).grid(row=0, column=1)
 
-    self.geomtype = StringVar()
-    Label(self, text='Geometry Type:', background = StyMan.bgClrData).grid(row=4, column=0, sticky='E')
-    self.gtBox = ttk.Combobox(self, values=['polygon','multipolygon','linestring','multilinestring','point','multipoint','none'])
-    self.gtBox.current(0)
-    self.gtBox.grid(row=4, column=1, sticky="W")
-    
+    if self.lyrMeta:  # existing layer
+      _colData = (
+        [(col, type) for col, type in self.lyrMeta['columns'].items()]
+        if self.lyrMeta['columns']
+        else []
+      )
+      _colcols: list[tuple[str, int, Anchor]] = [('Column', 140, 'w'), ('Type', 200, 'w')]
+      TView(self, 'Columns', _colcols, 1, 0, _colData, self.rowsFor(_colData))
+
+      _idxData = (
+        [(idx[1], idx[0], idx[2]) for idx in self.lyrMeta['indexes']]
+        if self.lyrMeta['indexes']
+        else []
+      )
+      _idxCols: list[tuple[str, int, Anchor]] = [
+        ('Column', 110, 'w'),
+        ('idx_Name', 180, 'w'),
+        ('Type', 50, 'w'),
+      ]
+      TView(self, 'Indexes', _idxCols, 1, 3, _idxData, self.rowsFor(_idxData))
+
+      _ldData = (
+        [
+          (
+            dump[2],
+            dump[1],
+            datetime.fromisoformat(dump[3]).strftime('%d/%m/%Y %H:%M'),
+            dump[4],
+            dump[5],
+            dump[6],
+          )
+          for dump in self.lyrMeta['pgDumps']
+        ]
+        if self.lyrMeta['pgDumps']
+        else []
+      )
+      _ldData.sort(key=lambda x: datetime.strptime(x[2], "%d/%m/%Y %H:%M"), reverse=True)
+      _ldCols: list[tuple[str, int, Anchor]] = [
+        ('Supply Version', 110, 'w'),
+        ('Type', 60, 'w'),
+        ('Date', 110, 'w'),
+        ('Adds', 70, 'e'),
+        ('Dels', 70, 'e'),
+        ('Count', 80, 'e'),
+      ]
+      TView(self, 'Update History', _ldCols, 3, 0, _ldData, self.rowsFor(_ldData))
+    else:
+      ttk.Label(self, text="No metadata held for this layer.", style='Muted.TLabel').grid(
+        row=1, column=0, columnspan=4, sticky='w', pady=(10, 0)
+      )
+
+    # How wide this pane needs to be depends on the layer that was clicked, so the
+    # window is given the chance to grow into it.
+    self.guic.fitToContent()
+
+  # What the data tab shows below the upload buttons. A table already registered with
+  # VLRS needs no form, so it gets the local state that decides what an upload does.
+  def mkUploadPane(self, lyr: LyrReg) -> None:
+    _known = bool(self.lyrMeta)
+    if _why := self.guic.uploadBlocked(lyr):
+      _text, _style = _why, 'Warn.TLabel'
+    elif _known:
+      _text, _style = "Held by VLRS. Choose a supply type above.", 'Muted.TLabel'
+    else:
+      _text, _style = (
+        "Not registered with VLRS. Describe it below, then upload FULL.",
+        'Warn.TLabel',
+      )
+    ttk.Label(self, text=_text, style=_style).grid(
+      row=1, column=0, columnspan=5, sticky='w', pady=(10, 0)
+    )
+    self.mkNewUplFrm(lyr, _known)
+
+    ttk.Label(self, text='Local state', style='Head.TLabel').grid(
+      row=2, column=2, columnspan=2, sticky='w', padx=(30, 0), pady=(10, 6)
+    )
+    _rows: list[tuple[str, str]] = [
+      ('Status', f"{lyr.status}{' (in error)' if lyr.err else ''}"),
+      ('Supply', f"{lyr.sup} {lyr.sup_type or ''}".strip()),
+      ('Version', str(lyr.sup_ver)),
+      ('Rows', str(lyr.extradata.get('row_count', 'unknown'))),
+      ('Active', 'yes' if lyr.active else 'no'),
+    ]
+    for ii, (name, val) in enumerate(_rows):
+      ttk.Label(self, text=f"{name}:", width=10, anchor='e', style='Card.TLabel').grid(
+        row=3 + ii, column=2, sticky='e', padx=(30, 8), pady=2
+      )
+      ttk.Label(
+        self, text=val, style='Err.TLabel' if name == 'Status' and lyr.err else 'Card.TLabel'
+      ).grid(row=3 + ii, column=3, sticky='w', pady=2)
+
+  # Known is a table VLRS already holds, whose answers come from the server and are
+  # shown filled in rather than hidden, so the tab reads the same for either.
+  # Tall enough to be worth scrolling, short enough not to leave a blank pane under
+  # two rows of content.
+  @staticmethod
+  def rowsFor(data: list[tuple[Any, ...]]) -> int:
+    return max(4, min(len(data), 10))
+
+  def mkNewUplFrm(self, lyr: LyrReg, known: bool) -> None:
+    _state = 'disabled' if known else 'readonly'
+    ttk.Label(self, text='Dataset' if known else 'Register and upload', style='Head.TLabel').grid(
+      row=2, column=0, columnspan=2, sticky='w', pady=(10, 6)
+    )
+
+    ttk.Label(self, text='Relation:', width=16, anchor='e', style='Card.TLabel').grid(
+      row=3, column=0, sticky="e", padx=(0, 8)
+    )
+    self.relBox = ttk.Combobox(self, values=['table', 'view'], state=_state, width=22)
+    self.relBox.set((lyr.relation or '') if known else 'table')
+    self.relBox.grid(row=3, column=1, sticky="w", pady=2)
+
+    self.mdUUID = StringVar(value=(lyr.md_uuid or '') if known else '')
+    ttk.Label(self, text='GeoNetwork UUID:', width=16, anchor='e', style='Card.TLabel').grid(
+      row=4, column=0, sticky='e', padx=(0, 8)
+    )
+    ttk.Entry(
+      self,
+      textvariable=self.mdUUID,
+      width=40,
+      state='disabled' if known else 'normal',
+      cursor=textCursor(self),
+    ).grid(row=4, column=1, sticky='w', pady=2)
+
+    ttk.Label(self, text='Geometry type:', width=16, anchor='e', style='Card.TLabel').grid(
+      row=5, column=0, sticky='e', padx=(0, 8)
+    )
+    self.gtBox = ttk.Combobox(
+      self,
+      state=_state,
+      width=22,
+      values=[
+        'polygon',
+        'multipolygon',
+        'linestring',
+        'multilinestring',
+        'point',
+        'multipoint',
+        'none',
+      ],
+    )
+    self.gtBox.set((lyr.geom_type or '') if known else 'polygon')
+    self.gtBox.grid(row=5, column=1, sticky="w", pady=2)
+
     self.vdp = IntVar(value=0)
-    Label(self, text='VDP:', background = StyMan.bgClrData).grid(row=5, column=0, sticky='E')
-    self.vdpChk = Checkbutton(self, variable=self.vdp, onvalue=1, offvalue=0)
-    self.vdpChk.grid(row=5, column=1, sticky="W")
+    ttk.Label(self, text='VDP:', width=16, anchor='e', style='Card.TLabel').grid(
+      row=6, column=0, sticky='e', padx=(0, 8)
+    )
+    ttk.Checkbutton(
+      self, variable=self.vdp, onvalue=1, offvalue=0, state='disabled' if known else 'normal'
+    ).grid(row=6, column=1, sticky="w", pady=2)
 
-    testBtn = Button(self, text="test", padx=5, pady=2, background="snow3", bg=StyMan.qaClrPass, command=lambda:self.testVars())
-    testBtn.grid(row=6, column=1, padx=5, pady=5)
-    
-  def testVars(self):
-    print(f"{self.mdUUID.get()} {self.relBox.get()} {self.gtBox.get()} {"true" if self.vdp.get() else "false"}")
+  def mkFrUpload(self, bar: ttk.Frame, lyr: LyrReg) -> None:
+    ttk.Label(bar, text='Upload', style='Card.TLabel').grid(row=0, column=0, padx=(0, 10))
+    _btns = {
+      sup: ttk.Button(bar, text=sup.upper(), command=lambda s=sup: self.upload(lyr, s))
+      for sup in (Supplies.INC, Supplies.DIFF, Supplies.FULL)
+    }
+    for ii, btn in enumerate(_btns.values()):
+      btn.grid(row=0, column=ii + 1, padx=(0, 6))
 
-  def mkFrUpload(self, lyr):
-    _fr = Frame(self, borderwidth=1, relief="raised", bg=StyMan.bgClrPass)
-    ttk.Label(_fr, text='Upload', border=3).grid(row=0, column=0, padx=10)
-    lyrUploadInc = Button(_fr, text="INC", padx=5, pady=2, background="snow3", bg=StyMan.qaClrPass, command=lambda:self.upload(lyr, Supplies.INC))
-    lyrUploadInc.grid(row=0, column=1, pady=5)
-    
-    lyrUploadDiff = Button(_fr, text="DIFF", padx=5, pady=2, background="snow3", bg=StyMan.qaClrPass, command=lambda:self.upload(lyr, Supplies.DIFF))
-    lyrUploadDiff.grid(row=0, column=2, padx=5, pady=5)
-    lyrUploadFull = Button(_fr, text="FULL", padx=5, pady=2, background="snow3", bg=StyMan.qaClrPass, command=lambda:self.upload(lyr, Supplies.FULL))
-    lyrUploadFull.grid(row=0, column=3, padx=5, pady=5)
-    
-    if not self.lyrMeta: # new dataset, full upload only
-      lyrUploadInc.configure(fg='white', state="disabled", bg=StyMan.bgClrFail)
-      lyrUploadDiff.configure(fg='white', state="disabled", bg=StyMan.bgClrFail)
-    if not self.guic.uploadAllowed(lyr):
-      lyrUploadInc.configure(fg='white', state="disabled", bg=StyMan.bgClrFail)
-      lyrUploadDiff.configure(fg='white', state="disabled", bg=StyMan.bgClrFail)
-      lyrUploadFull.configure(fg='white', state="disabled", bg=StyMan.bgClrFail)
-    return _fr
-    
-  def getLyrMetadata(self, ident):
-    api = ApiUtils(self.guic.cfg.get('baseUrl'), self.guic.cfg.get('api_key'), self.guic.cfg.get('client_id'))
+    if not self.lyrMeta:  # new dataset, full upload only
+      _btns[Supplies.INC].configure(state="disabled")
+      _btns[Supplies.DIFF].configure(state="disabled")
+    if self.guic.uploadBlocked(lyr):
+      [btn.configure(state="disabled") for btn in _btns.values()]
+
+  def getLyrMetadata(self, ident: str) -> dict[str, Any] | None:
+    api = ApiUtils(
+      self.guic.cfg.get('baseUrl'), self.guic.cfg.get('api_key'), self.guic.cfg.get('client_id')
+    )
     response = None
     try:
       response = api.post("data", {"dset": f"{ident}"})
@@ -444,376 +1086,445 @@ class SubFrMetaLyrInfo(SubFrMeta):
       logging.warning(ex)
     return response
 
-  
-  # def geonet(self, layerMeta):
-  #   webbrowser.open_new(layerMeta['metadata'])
-
-  def upload(self, lyr, upldType):
-    print(f"{lyr}, {upldType}")
+  def upload(self, lyr: LyrReg, upldType: str) -> None:
     if not self.guic.uploadAllowed(lyr, upldType):
-      print(f"You have no rights to update {lyr.identity} data. If you think you should, try refreshing the registration")
       return
-    elif upldType==Supplies.INC:
-      print("INCREMENTAL supplies have not yet been implemented from the client")
-    # do the upload ...
-    sync = Synccer(self.guic.cfg, DB(self.guic.cfg))
-    if self.lyrMeta: # existing dset
-      sync.upload(lyr.identity, upldType)
-    else:
-      _uuid = self.mdUUID.get()
-      _rel = self.relBox.get()
-      _gType = self.gtBox.get()
-      _vdp = "true" if self.vdp.get() else "false"
-      print(f"{_uuid} {_rel} {_gType} {_vdp}")
-      sync.upload(lyr.identity, upldType, relation=_rel, md_uuid=_uuid, geomType=_gType, vdp=_vdp)
+    if upldType == Supplies.INC:
+      self.guic.status.idle("Incremental supplies are not implemented from the client.", 'Warn')
+      return
+    if self.guic.busy:
+      self.guic.status.idle("Another job is still running.", 'Warn')
+      return
 
-  def reseed(self, ident):
-    print(f"Reseeding {ident}")
+    # The form is read here, on the ui thread. The worker only gets plain values.
+    _new = (
+      None
+      if self.lyrMeta
+      else {
+        'relation': self.relBox.get(),
+        'md_uuid': self.mdUUID.get(),
+        'geomType': self.gtBox.get(),
+        'vdp': bool(self.vdp.get()),
+      }
+    )
+
+    self.guic.busy = True
+    self.guic.status.busy(f"Uploading {lyr.identity} ...")
+    self.guic.runAsync(
+      lambda: self._runUpload(lyr.identity, upldType, _new),
+      lambda ok, err: self._uploadDone(lyr, ok, err),
+    )
+
+  # Off the ui thread, so it opens its own connection and touches no widget.
+  def _runUpload(self, ident: str, upldType: str, new: dict[str, Any] | None) -> bool:
     _db = DB(self.guic.cfg)
-    _db.fixErrs(ident)
-    _db.close()
-    # Should we kick off an immediate sync? (may get hung up on other unsyncced layers for awhile.)
+    try:
+      sync = Synccer(self.guic.cfg, _db)
+      if new is None:  # existing dset
+        return sync.upload(ident, upldType)
+      return sync.upload(ident, upldType, **new)
+    finally:
+      _db.close()
+
+  def _uploadDone(self, lyr: LyrReg, ok: bool, err: Exception | None) -> None:
+    self.guic.busy = False
+    if err:
+      self.guic.status.idle(f"Upload of {lyr.identity} failed: {err}", 'Err')
+    else:
+      self.guic.status.idle(
+        f"Upload of {lyr.identity} {'succeeded' if ok else 'did not succeed'}",
+        'Ok' if ok else 'Err',
+      )
+    self.guic.frSetup.ctrlFrm.refresh()
+
+  def openMetaLink(self) -> None:
+    if link := (self.lyrMeta or {}).get('metadata'):
+      webbrowser.open_new(link)
+    else:
+      self.guic.status.idle("This layer has no metadata link to open.", 'Warn')
+
+  def reseed(self, ident: str) -> None:
+    _db = DB(self.guic.cfg)
+    try:
+      _db.fixErrs(ident)
+    finally:
+      _db.close()
+    self.guic.status.idle(f"{ident} queued for reseeding.", 'Ok')
+
 
 class TView(ttk.Treeview):
-  def __init__(self, owner, name, colTupl, row, col, data, height=10):
+  def __init__(
+    self,
+    owner: Misc,
+    name: str,
+    colTupl: list[tuple[str, int, Anchor]],
+    row: int,
+    col: int,
+    data: list[tuple[Any, ...]],
+    height: int = 10,
+  ):
     super().__init__(owner, columns=[c[0] for c in colTupl], height=height, show='headings')
 
-    self.colHdr = ttk.Label(owner, text=name, style='treeHeading.TLabel')
-    self.colHdr.grid(row=row, column=col, columnspan=len(colTupl)+1, sticky='w')
+    self.colHdr = ttk.Label(owner, text=name, style='Head.TLabel')
+    self.colHdr.grid(row=row, column=col, columnspan=len(colTupl) + 1, sticky='w', pady=(10, 4))
     [self.mkCol(tupl) for tupl in colTupl]
-    [self.insert('', END, value=rowData) for rowData in data]
-    self.grid(row=row+1, column=col, columnspan=len(colTupl), sticky='nsew')
+    [self.insert('', 'end', values=rowData) for rowData in data]
+    self.grid(row=row + 1, column=col, columnspan=len(colTupl), sticky='nsew')
 
-    self.scrollbar = Scrollbar(owner, orient='vertical', command=self.yview)
-    self.scrollbar.grid(row=row+1, column=col+len(colTupl), sticky='ns', padx=(0,3))
+    self.scrollbar = ttk.Scrollbar(owner, orient='vertical', command=self.yview)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    self.scrollbar.grid(row=row + 1, column=col + len(colTupl), sticky='ns', padx=(0, 8))
     self.configure(yscrollcommand=self.scrollbar.set)
+    self.scrollbar.set(0.0, 1.0)  # a table with no rows never reports a position
 
-  def mkCol(self, colTupl):
+  def mkCol(self, colTupl: tuple[str, int, Anchor]) -> None:
     name, wid, anc = colTupl
     self.heading(name, text=name)
     self.column(name, minwidth=0, width=wid, anchor=anc, stretch=True)
 
+
 class FrSetup(ttk.Frame):
-  def __init__(self, container, guic):
-    super().__init__(container, style="bad.TFrame")
+  def __init__(self, container: Misc, guic: GuiControl):
+    super().__init__(container, padding=12)
     self.guic = guic
 
-    # Label(tSetup, text='Vicmap Replication Service', font=(32)).grid(row=0, column=0, columnspan=2, padx=5, pady=5)
-    ##
-    # qaReg
-    Label(self, text='profile:', bg=StyMan.bgClrPass).grid(row=0, column=0, sticky="E")
+    _top = ttk.Frame(self)
+    _top.grid(row=0, column=0, sticky='ew', pady=(0, 10))
+    ttk.Label(_top, text='Profile:').grid(row=0, column=0, sticky="e", padx=(0, 6))
     self.profiles = self.guic.cfg.cp.sections()
-    # self.profiles.append("Add New...")
-    self.proBox = ttk.Combobox(self, values=self.profiles)
+    self.proBox = ttk.Combobox(_top, values=self.profiles, state='readonly', width=20)
     self.proBox.current(0)
-    self.proBox.grid(row=0, column=1, sticky="W")
+    self.proBox.grid(row=0, column=1, sticky="w")
     self.proBox.bind("<<ComboboxSelected>>", self.profileChanged)
-    self.proBox.bind("<Return>",self.profileChanged)
-    
-    Label(self, text='API URL:', bg=StyMan.bgClrPass).grid(row=1, column=0, sticky="E")
+
+    ttk.Label(_top, text='API:').grid(row=0, column=2, sticky="e", padx=(20, 6))
     self.strurl = StringVar(value=self.guic.cfg.get('baseUrl'))
-    Label(self, textvariable=self.strurl, bg=StyMan.bgClrPass).grid(row=1, column=1, sticky="W")
-    
-    self.ctrlFrm = SubFrCtrl(self, self.guic)
-    self.ctrlFrm.grid(row=4, column=0, columnspan=2, padx=5, pady=(0,5), sticky='E')
+    ttk.Label(_top, textvariable=self.strurl).grid(row=0, column=3, sticky="w")
+
     self.regFrm = SubFrReg(self, self.guic)
-    self.regFrm.grid(row=2, column=0, columnspan=2, padx=5, pady=(0,5), sticky='nsew')
+    self.regFrm.grid(row=1, column=0, sticky='nsew', pady=(0, 10))
     self.dbFrm = SubFrDb(self, self.guic)
-    self.dbFrm.grid(row=3, column=0, columnspan=2, padx=5, pady=(0,5), sticky='nsew')
-    
-  ###########################################################################
-  
-  def profileChanged(self, event):
+    self.dbFrm.grid(row=2, column=0, sticky='nsew', pady=(0, 10))
+    self.ctrlFrm = SubFrCtrl(self, self.guic)
+    self.ctrlFrm.grid(row=3, column=0, sticky='nsew')
+
+    self.columnconfigure(0, weight=1)
+    self.rowconfigure(3, weight=1)
+
+  def profileChanged(self, event: Any) -> None:
     _profile = self.proBox.get()
-    # print(f"{_profile} {event}")
     if _profile not in self.guic.cfg.cp.sections():
-      print("Making new section")
-      self.guic.cfg.setStage(_profile)
       self.profiles.append(_profile)
-      self.refresh()
-    else:
-      print("updating with existing section")
-      self.guic.cfg.setStage(_profile)
-      self.refresh()
-  
-  def test(self):
+    self.guic.cfg.setStage(_profile)
+    self.refresh()
+
+  def test(self) -> None:
     self.regFrm.test()
     self.dbFrm.test()
-    
-  def refresh(self):
-    # meta
+
+  def refresh(self) -> None:
     self.strurl.set(self.guic.cfg.get('baseUrl'))
     self.regFrm.refresh()
     self.dbFrm.refresh()
     self.ctrlFrm.refresh()
 
-class SubFr(Frame):
-  def __init__(self, owner, guic):
-    # print(self.__class__.__name__)
-    if self.__class__.__name__ != 'SubFrCtrl':
-      super().__init__(owner, bg=StyMan.qaClrFail, borderwidth=5, padx=5, pady=5, relief="sunken")
-    else:
-      super().__init__(owner, borderwidth=5, padx=5, pady=5, relief="raised")
-    self.bgClr = StringVar(value=StyMan.qaClrFail)
+
+class SubFr(Card):
+  def __init__(self, owner: Misc, guic: GuiControl, title: str):
+    super().__init__(owner, title)
     self.guic = guic
-    self.bgElements = [self]
+    self.entries: dict[str, ttk.Entry] = {}
+    self.vars: dict[str, StringVar] = {}
+    self.qaMarks: dict[str, ttk.Label] = {}
+    self.columnconfigure(3, weight=1)  # pushes the checks panel to the right edge
 
-  def paint(self, passed):
-    for ele in self.bgElements:
-      [ele.config(bg=StyMan.qaClrPass if passed else StyMan.qaClrFail) for ele in self.bgElements]
-
-  def lblEnt(self, fr, bgClr, var, name, val, wid, row, col, colspan=1, private=False):
-    # set label as lbl{var}
-    setattr(self, f"lbl{var}", Label(fr, text=f"{name}:", background=bgClr.get(), width=8))
-    getattr(self, f"lbl{var}").grid(row=row, column=col, sticky="E")
-    self.bgElements.append(getattr(self, f"lbl{var}"))
-    # set entry as var, value as str{var}
+  def lblEnt(
+    self,
+    var: str,
+    name: str,
+    val: str,
+    wid: int,
+    row: int,
+    col: int,
+    colspan: int = 1,
+    private: bool = False,
+  ) -> None:
+    ttk.Label(self, text=f"{name}:", width=11, anchor='e', style='Card.TLabel').grid(
+      row=row, column=col, sticky="e", padx=(0, 8), pady=2
+    )
     _displayVal = val if not private else '' if not val else 'xxxxx-xxxxx-xxxxx'
-    setattr(self, f"str{var}", StringVar(value=_displayVal))#'xxxxx-xxxxx-xxxxx' if private else val))
-    setattr(self, var, Entry(fr, textvariable=getattr(self, f"str{var}"), width=wid if wid else 20, bd=3))
-    # getattr(self, var).insert(0, val)
-    getattr(self, var).grid(row=row, column=col+1, columnspan=colspan, sticky="W", padx=5, pady=2)
-    return getattr(self, f"lbl{var}")
+    self.vars[var] = StringVar(value=_displayVal)
+    ent = ttk.Entry(self, textvariable=self.vars[var], width=wid, cursor=textCursor(self))
+    ent.grid(row=row, column=col + 1, columnspan=colspan, sticky="w", pady=2)
+    self.entries[var] = ent
 
-  def qaChk(self, fr, var, desc, row, col): #(self.cntrlFrame, "DB", "DB", 1, 0)
-    setattr(self, f"qa{var}", IntVar(value=0)) # IntVar())#self.qaDb = IntVar()
-    setattr(self, f"chk{var}", Checkbutton(fr, text=desc, variable=getattr(self, f"qa{var}"), onvalue=1, offvalue=0))#, tristatevalue=2))#o)) # self.dbChk = Checkbutton(self.cntrlFrame, text='DB', variable=self.qaDb, onvalue=1, offvalue=0)#, command=print_selection)
-    getattr(self, f"chk{var}").config(state="disabled")
-    getattr(self, f"chk{var}").grid(row=row, column=col, sticky='W')
-    return getattr(self, f"qa{var}")
-  
+  QA_WIDTH = 14
+
+  def qaRow(self, fr: Misc, var: str, desc: str, row: int) -> None:
+    mark = ttk.Label(fr, text='–', width=2, anchor='center', style='Muted.TLabel')
+    mark.grid(row=row, column=0, sticky='w')
+    ttk.Label(fr, text=desc, width=self.QA_WIDTH, style='Card.TLabel').grid(
+      row=row, column=1, sticky='w', padx=(4, 0)
+    )
+    self.qaMarks[var] = mark
+
+  # None means it has not been run, which is neither a pass nor a failure.
+  def setQa(self, var: str, state: bool | None) -> None:
+    _look = {None: ('–', 'Muted'), True: ('\u2713', 'Ok'), False: ('\u2717', 'Err')}
+    txt, sty = _look[state]
+    self.qaMarks[var].configure(text=txt, style=f'{sty}.TLabel')
+
+  # The state in words as well as in a mark, because a mark alone is a colour to
+  # anyone who cannot pick it out.
+  def qaSay(self, lbl: ttk.Label, passed: bool, okMsg: str, failMsg: str) -> None:
+    lbl.configure(text=okMsg if passed else failMsg, style='Ok.TLabel' if passed else 'Err.TLabel')
+
+
 class SubFrReg(SubFr):
-  def __init__(self, owner, guic):
-    super().__init__(owner, guic)
+  def __init__(self, owner: FrSetup, guic: GuiControl):
+    super().__init__(owner, guic, 'Registration')
 
-    """ HEADER """
-    self.lblRegHdr = Label(self, text='Registration', background=self.bgClr.get())
-    self.lblRegHdr.grid(row=0, column=0, columnspan=3, pady=(0,5), sticky="W")
-    self.bgElements.append(self.lblRegHdr)
-    """ QA """
-    qaFr = Frame(self, borderwidth=1, relief="solid")
-    Label(qaFr, text='QA', font=(32), width=12).grid(row=0, column=0, pady=2)
-    self.qaVars = []
-    qaArr = [("Reg", "Registered", 1, 0), ("Val", "Validated", 2, 0)]
-    [self.qaVars.append(self.qaChk(qaFr, *qat)) for qat in qaArr]
-    Button(qaFr, text='Refresh', relief="solid", command=lambda:self.test()).grid(row=3, rowspan=1, column=0, sticky="nsew", padx=5, pady=5)#(5,5))
-    qaFr.grid(row=0, column=4, rowspan=5, columnspan=1, sticky='E', padx=20, pady=5)
-    
-    """ EMAIL """
+    qaFr = ttk.Frame(self, style='Qa.TFrame', padding=10)
+    qaFr.grid(row=self.row, column=5, rowspan=4, sticky='ne', padx=(20, 0))
+    self.qaRow(qaFr, 'Reg', 'Registered', 0)
+    self.qaRow(qaFr, 'Val', 'Validated', 1)
+    ttk.Button(qaFr, text='Refresh', command=self.test).grid(
+      row=2, column=0, columnspan=2, sticky='ew', pady=(10, 0)
+    )
+
     _valEmail = self.guic.cfg.get("email") or ""
-    self.lblemail = self.lblEnt(self, self.bgClr, 'email', 'email', _valEmail, 60, 1, 0, 3)
-    """ CLIENT_ID """
+    self.lblEnt('email', 'Email', _valEmail, 50, self.row, 0, 3)
     _valClient = self.guic.cfg.get("client_id") or ''
-    self.lblClientId = self.lblEnt(self, self.bgClr, 'clientId', 'Client ID', _valClient, 40, 2, 0, private=True)
-    self.clientId.config(state='disabled')
-    """ API_KEY """
+    self.lblEnt('clientId', 'Client ID', _valClient, 34, self.row + 1, 0, private=True)
+    self.entries['clientId'].configure(state='disabled')
     _valApik = self.guic.cfg.get("api_key") or ''
-    self.lblApik = self.lblEnt(self, self.bgClr, 'apik', 'API Key', _valApik, 40, 3, 0, private=True)
-    self.apik.config(state='disabled')
-    """ MESSAGE """
-    self.regMsg = Label(self, text='', background=self.bgClr.get())
-    self.regMsg.grid(row=5, column=0, columnspan=4, pady=(0,5), sticky="E")
-    self.bgElements.append(self.regMsg)
-    
-    if self.guic.cfg.get('regComplete')=="True": self.paint(True)
-    
-  def test(self):
-    self.guic.cfg.set({"email":self.email.get()}) # client_id and api_key are non editable.
-    
-    qaCode, qaMsg = self.guic.qa.checkApiClient()
-    print(f"{qaCode}, {qaMsg}")
-    if qaCode == 0: #possible?
-      self.regMsg.config(text=qaMsg)
-      # self.paint(False)
-    elif qaCode == 1: # still need to verify the email
-      self.qaReg.set(1)
-      self.regMsg.config(text=qaMsg)
-      # self.paint(False)
-    elif qaCode == 2: # verified
-      self.qaReg.set(1)
-      self.qaVal.set(1)
-      self.regMsg.config(text="Read and Upload rights have been set.")#str(qaMsg))
-      self.guic.rights = qaMsg # dict returned when success here.
-      # self.paint(True)
+    self.lblEnt('apik', 'API key', _valApik, 34, self.row + 2, 0, private=True)
+    self.entries['apik'].configure(state='disabled')
+
+    self.regMsg = ttk.Label(self, text='', style='Muted.TLabel')
+    self.regMsg.grid(row=self.row + 3, column=0, columnspan=5, sticky="w", pady=(8, 0))
+
+    self.setQa('Reg', True if self.guic.cfg.get("client_id") else None)
+    self.setQa('Val', True if self.guic.cfg.get("api_key") else None)
+    if self.guic.cfg.get('regComplete') == "True":
+      self.qaSay(self.regMsg, True, "Registered and validated.", "")
+
+  # Only worth doing unprompted when there is a registration to check. An incomplete
+  # one is the setup flow, which posts a new registration and sends a verification
+  # email, and that is the user's to start.
+  def refreshRights(self) -> None:
+    if self.guic.cfg.get('client_id') and self.guic.cfg.get('api_key'):
+      self.test()
+
+  def test(self) -> None:
+    self.guic.cfg.set({"email": self.entries['email'].get()})
+    self.regMsg.configure(text="Checking ...", style='Muted.TLabel')
+    self.guic.runAsync(self.guic.qa.checkApiClient, self._testDone)
+
+  def _testDone(self, result: tuple[int, Any] | None, err: Exception | None) -> None:
+    if err or not result:
+      self.qaSay(self.regMsg, False, "", f"Registration check failed: {err}")
+      return
+    qaCode, qaMsg = result
+    if qaCode == 0:
+      self.qaSay(self.regMsg, False, "", str(qaMsg))
+    elif qaCode == 1:  # still need to verify the email
+      self.setQa('Reg', True)
+      self.setQa('Val', False)
+      self.regMsg.configure(text=str(qaMsg), style='Warn.TLabel')
+    elif qaCode == 2:  # verified
+      self.setQa('Reg', True)
+      self.setQa('Val', True)
+      self.qaSay(self.regMsg, True, "Read and upload rights have been set.", "")
+      self.guic.rights = qaMsg  # dict returned when success here
       self.guic.frMeta.setData()
 
     self.refresh()
     self.guic.frSetup.ctrlFrm.refresh()
-    # self.guic.frMeta.setData()
-    # self.regMsg.config(text=qaMsg)
-  
-  def refresh(self):
-    # repopulate the values from config as values/profile may have changed.
-    self.stremail.set(self.guic.cfg.get("email"))
-    self.strclientId.set('xxxxx-xxxxx-xxxxx' if self.guic.cfg.get("client_id") else '')
-    self.strapik.set('xxxxx-xxxxx-xxxxx' if self.guic.cfg.get("api_key") else '')
-    self.qaReg.set(1 if self.guic.cfg.get("client_id") else 0)
-    self.qaVal.set(1 if self.guic.cfg.get("api_key") else 0)
 
-    self.paint(self.guic.cfg.get("regComplete")=="True")
+  def refresh(self) -> None:
+    self.vars['email'].set(self.guic.cfg.get("email"))
+    self.vars['clientId'].set('xxxxx-xxxxx-xxxxx' if self.guic.cfg.get("client_id") else '')
+    self.vars['apik'].set('xxxxx-xxxxx-xxxxx' if self.guic.cfg.get("api_key") else '')
+    self.setQa('Reg', True if self.guic.cfg.get("client_id") else None)
+    self.setQa('Val', True if self.guic.cfg.get("api_key") else None)
+
 
 class SubFrDb(SubFr):
-  def __init__(self, owner, guic):
-    super().__init__(owner, guic)
-  
-    """ HEADER """
-    self.lblDbHdr = Label(self, text='Database Connection Details', background=self.bgClr.get())
-    self.lblDbHdr.grid(row=0, column=0, columnspan=2, sticky='W', pady=(0,5))
-    self.bgElements.append(self.lblDbHdr)
-    """ QA """
-    qaFr = Frame(self, borderwidth=1, relief="solid")
-    Label(qaFr, text='QA', font=(32), width=12).grid(row=0, column=0, pady=2)
-    self.qaVars = []
-    qaArr = [("Db", "DB cnxn", 1, 0), ("Clt", "DB PG_Client", 2, 0), ("Spat", "PostGis", 3, 0), ("Meta", "Metadata", 4, 0)]
-    [self.qaVars.append(self.qaChk(qaFr, *qat)) for qat in qaArr]
-    Button(qaFr, text='Test DB', relief="solid", command=self.test).grid(row=5, column=0, rowspan=1, sticky="nsew", padx=5, pady=5)#row=4, column=0, sticky="W", pady=(0,5))
-    # Button(qaFr, text='Test Spatial', command=self.test('spat')).grid(row=0, column=3, sticky="E", pady=(0,5))
-    qaFr.grid(row=0, column=4, rowspan=6, columnspan=1, sticky='E', padx=20, pady=5)
-    
-    """ DATABASE PARAMETERS - set defaults if not present in config """
-    _valEndp = self.guic.cfg.get("dbHost") or "localhost"
-    self.lblEnt(self, self.bgClr, 'endp', 'endpoint', _valEndp, 60, 1, 0, 3)
-    _valInst = self.guic.cfg.get("dbName") or "vicmap"
-    self.lblEnt(self, self.bgClr, 'inst', 'instance', _valInst, None, 2, 0)
-    _valPort = self.guic.cfg.get("dbPort") or '5432'
-    self.lblEnt(self, self.bgClr, 'port', 'port', _valPort, 10, 3, 0)
-    _valUser = self.guic.cfg.get("dbUser") or "vicmap"
-    self.lblEnt(self, self.bgClr, 'user', 'username', _valUser, None, 2, 2)
-    _valPswd = self.guic.cfg.get("dbPswd") or "vicmap"
-    self.lblEnt(self, self.bgClr, 'pswd', 'password', _valPswd, None, 3, 2)
+  def __init__(self, owner: FrSetup, guic: GuiControl):
+    super().__init__(owner, guic, 'Database connection')
 
-    """ DATABASE CLIENT """
-    self.lblDbHdr = Label(self, text='Database Connection Details', background=self.bgClr.get())#, style="Bold.TLabel"
-    # self.lblDbHdr.configure(font=('Helvetica',18,'bold'))
-    title = 'Database Client path -> home folder for pg_dump & pg_restore.'
-    self.lblCltHdr = Label(self, text=title, background=self.bgClr.get())
-    self.lblCltHdr.grid(row=4, column=0, columnspan=4, sticky='W', pady=(0,5))
-    self.bgElements.append(self.lblCltHdr)
-    _binPath = self.guic.cfg.get("dbClientPath") or r"C:\Program Files\PostgreSQL\17\bin"
-    self.lblEnt(self, self.bgClr, 'binPath', 'Bin Path', _binPath, 60, 5, 0, 4)
-    
-    if self.guic.cfg.get('dbComplete')=="True": self.paint(True)
+    qaFr = ttk.Frame(self, style='Qa.TFrame', padding=10)
+    qaFr.grid(row=self.row, column=5, rowspan=6, sticky='ne', padx=(20, 0))
+    for ii, (var, desc) in enumerate(
+      [("Db", "Connection"), ("Clt", "PG client"), ("Spat", "PostGIS"), ("Meta", "Metadata")]
+    ):
+      self.qaRow(qaFr, var, desc, ii)
+    ttk.Button(qaFr, text='Test database', command=self.test).grid(
+      row=4, column=0, columnspan=2, sticky='ew', pady=(10, 0)
+    )
 
-  def test(self):
-    # update config
-    self.guic.cfg.set({'dbHost':self.endp.get(), 'dbPort':self.port.get(), 'dbName':self.inst.get(), 
-      'dbUser':self.user.get(), 'dbPswd':self.pswd.get(), 'dbClientPath':self.binPath.get()})
-    
-    # nested if's below, becuase don't waste your time if one fails.
-    if self.guic.qa.checkDbControl():
-      self.qaDb.set(True)
-      if self.guic.qa.checkPGClient():
-        self.qaClt.set(True)
-        if self.guic.qa.checkPostGis(): 
-          self.qaSpat.set(True)
-          if self.guic.qa.checkMetaData(): 
-            self.qaMeta.set(True)
+    self.lblEnt('endp', 'Endpoint', self.guic.cfg.get("dbHost") or "localhost", 50, self.row, 0, 3)
+    self.lblEnt('inst', 'Instance', self.guic.cfg.get("dbName") or "vicmap", 18, self.row + 1, 0)
+    self.lblEnt('user', 'Username', self.guic.cfg.get("dbUser") or "vicmap", 18, self.row + 1, 2)
+    self.lblEnt('port', 'Port', self.guic.cfg.get("dbPort") or '5432', 18, self.row + 2, 0)
+    self.lblEnt('pswd', 'Password', self.guic.cfg.get("dbPswd") or "vicmap", 18, self.row + 2, 2)
+    ttk.Label(self, text='Home folder for pg_dump and pg_restore', style='Muted.TLabel').grid(
+      row=self.row + 3, column=1, columnspan=3, sticky='w', pady=(6, 0)
+    )
+    self.lblEnt(
+      'binPath',
+      'Bin path',
+      self.guic.cfg.get("dbClientPath") or pgBinDefault(),
+      50,
+      self.row + 4,
+      0,
+      3,
+    )
 
-    if self.guic.cfg.get("dbComplete")=="True":
-      self.paint(True)
+    self.dbMsg = ttk.Label(self, text='', style='Muted.TLabel')
+    self.dbMsg.grid(row=self.row + 5, column=0, columnspan=5, sticky='w', pady=(8, 0))
+
+    if self.guic.cfg.get("dbComplete") == "True":
+      [self.setQa(nm, True) for nm in ('Db', 'Clt', 'Spat', 'Meta')]
+      self.qaSay(self.dbMsg, True, "Database is ready.", "")
+
+  def test(self) -> None:
+    self.guic.cfg.set(
+      {
+        'dbHost': self.entries['endp'].get(),
+        'dbPort': self.entries['port'].get(),
+        'dbName': self.entries['inst'].get(),
+        'dbUser': self.entries['user'].get(),
+        'dbPswd': self.entries['pswd'].get(),
+        'dbClientPath': self.entries['binPath'].get(),
+      }
+    )
+    self.dbMsg.configure(text="Checking ...", style='Muted.TLabel')
+    self.guic.runAsync(self._runChecks, self._testDone)
+
+  # Off the ui thread. Nested, becuase don't waste your time if one fails.
+  def _runChecks(self) -> list[bool]:
+    _results = [self.guic.qa.checkDbControl()]
+    if _results[-1]:
+      _results.append(self.guic.qa.checkPGClient())
+      if _results[-1]:
+        _results.append(self.guic.qa.checkPostGis())
+        if _results[-1]:
+          _results.append(self.guic.qa.checkMetaData())
+    return _results
+
+  def _testDone(self, results: list[bool] | None, err: Exception | None) -> None:
+    if err:
+      self.qaSay(self.dbMsg, False, "", f"Database checks failed: {err}")
+    # A failed check stops the ones after it, so results is short and every box is
+    # cleared first rather than leaving a tick from the previous run standing.
+    _names = ['Db', 'Clt', 'Spat', 'Meta']
+    _got = results or []
+    # A check the run never reached is unknown, not failed.
+    for ii, nm in enumerate(_names):
+      self.setQa(nm, bool(_got[ii]) if ii < len(_got) else None)
+
+    # Read from the results just computed rather than from the config flag, which is
+    # written by the checks themselves and still holds the last run's answer.
+    if len(results or []) == len(_names) and all(results or []):
+      self.qaSay(self.dbMsg, True, "Database is ready.", "")
       self.guic.frData.setData()
-      
+    elif not err:
+      _failed = [nm for ii, nm in enumerate(_names) if ii >= len(_got) or not _got[ii]]
+      self.qaSay(self.dbMsg, False, "", f"Not ready. Outstanding: {', '.join(_failed)}")
+
     self.guic.frSetup.ctrlFrm.refresh()
 
-  def refresh(self):
-    # repopulate the values from config as profile has changed.
-    self.strendp.set(self.guic.cfg.get("dbHost") or "localhost")
-    self.strinst.set(self.guic.cfg.get("dbName") or "vicmap")
-    self.strport.set(self.guic.cfg.get("dbPort") or "5432")
-    self.struser.set(self.guic.cfg.get("dbUser") or "vicmap")
-    self.strpswd.set(self.guic.cfg.get("dbPswd") or "vicmap")
-    self.strbinPath.set(self.guic.cfg.get("dbClientPath") or r"C:\Program Files\PostgreSQL\17\bin")
-    
-    self.qaDb.set(0)
-    self.qaClt.set(0)
-    self.qaSpat.set(0)
-    self.qaMeta.set(0)
+  def refresh(self) -> None:
+    self.vars['endp'].set(self.guic.cfg.get("dbHost") or "localhost")
+    self.vars['inst'].set(self.guic.cfg.get("dbName") or "vicmap")
+    self.vars['port'].set(self.guic.cfg.get("dbPort") or "5432")
+    self.vars['user'].set(self.guic.cfg.get("dbUser") or "vicmap")
+    self.vars['pswd'].set(self.guic.cfg.get("dbPswd") or "vicmap")
+    self.vars['binPath'].set(self.guic.cfg.get("dbClientPath") or pgBinDefault())
+    [self.setQa(nm, None) for nm in ('Db', 'Clt', 'Spat', 'Meta')]
+    self.dbMsg.configure(text='', style='Muted.TLabel')
 
-    self.paint(False)
-    # self.test()
 
 class SubFrCtrl(SubFr):
-  def __init__(self, owner, guic):
-    super().__init__(owner, guic)#style="lyrInfo.TFrame"#"bad.TFrame")#
-    self.guic = guic
-    # self.columnconfigure(1, weight=1)
-    
-    self.syncBtn = Button(self, text='SYNC', font=(72), padx=30, relief="solid", background=StyMan.qaClrFail, command=self.sync)
-    self.syncBtn.grid(row=2, column=3, sticky='E')#, padx=5, pady=5)#.pack(side='top', fill='none', padx=5, pady=(15,0))
-    self.syncBtn.config(state="disabled")
-    
-    Label(self, text='datasets:').grid(row=1, column=4, sticky="E")
-    self.dsetCnt = Label(self, text='N/A')
-    self.dsetCnt.grid(row=1, column=5, sticky="W")
-    
-    Label(self, text='active:').grid(row=2, column=4, sticky="E")
-    self.activeCnt = Label(self, text='N/A')
-    self.activeCnt.grid(row=2, column=5, sticky="W")
-    
-    Label(self, text='errors:').grid(row=3, column=4, sticky="E")
-    self.errCnt = Label(self, text='N/A')
-    self.errCnt.grid(row=3, column=5, sticky="W")
+  def __init__(self, owner: FrSetup, guic: GuiControl):
+    super().__init__(owner, guic, 'Replication')
 
-    self.fixBtn = Button(self, text="Fix", command=self.fix)
-    self.fixBtn.grid(row=3, column=6, sticky='E', padx=5, pady=5)
-    
+    self.counts: dict[str, ttk.Label] = {}
+    for ii, (key, name) in enumerate(
+      [('dsets', 'Datasets'), ('active', 'Active'), ('errs', 'Errors')]
+    ):
+      ttk.Label(self, text=f"{name}:", width=11, anchor='e', style='Card.TLabel').grid(
+        row=self.row + ii, column=0, sticky='e', padx=(0, 8), pady=2
+      )
+      lbl = ttk.Label(self, text='N/A', width=8, style='Card.TLabel')
+      lbl.grid(row=self.row + ii, column=1, sticky='w', pady=2)
+      self.counts[key] = lbl
+
+    self.fixBtn = ttk.Button(self, text="Fix errors", command=self.fix)
+    self.fixBtn.grid(row=self.row, column=4, rowspan=3, sticky='e', padx=(20, 12), pady=4)
+
+    self.syncBtn = ttk.Button(self, text='SYNC', style='Accent.TButton', command=self.sync)
+    self.syncBtn.grid(row=self.row, column=5, rowspan=3, sticky='e', padx=(0, 8), pady=4)
+    self.syncBtn.configure(state="disabled")
+
     self.refresh()
 
-  def refresh(self):
-    if self.guic.cfg.get("dbComplete")=="True": # getting metadata has a dependancy on cfg.regComplete, so this covers both
-      _dsets = DB(self.guic.cfg).getRecSet(LyrReg)
-      # _total, _active, _errs = []
-      self.dsetCnt.config(text=len(_dsets))#str(len(_dsets)))
-      self.activeCnt.config(text=f'{str(len([d  for d in _dsets if d.active]))}')# and not d.err
-      self.errCnt.config(text=str(len([d for d in _dsets if d.err])))
-      self.syncBtn.config(state='active', bg=StyMan.qaClrPass)
+  def refresh(self) -> None:
+    # Getting metadata depends on cfg.regComplete, so this covers both.
+    if self.guic.cfg.get("dbComplete") == "True":
+      _db = DB(self.guic.cfg)
+      try:
+        _dsets = _db.getRecSet(LyrReg)
+      finally:
+        _db.close()
+      _errs = len([d for d in _dsets if d.err])
+      self.counts['dsets'].configure(text=str(len(_dsets)))
+      self.counts['active'].configure(text=str(len([d for d in _dsets if d.active])))
+      self.counts['errs'].configure(text=str(_errs), style='Err.TLabel' if _errs else 'Card.TLabel')
+      self.syncBtn.configure(state='normal')
     else:
-      self.dsetCnt.config(text="N/A")
-      self.activeCnt.config(text="N/A")
-      self.errCnt.config(text="N/A")
-      self.syncBtn.config(state='disabled', bg=StyMan.qaClrFail)
-    self.update_idletasks()
+      [lbl.configure(text="N/A", style='Card.TLabel') for lbl in self.counts.values()]
+      self.syncBtn.configure(state='disabled')
 
-  def fix(self):
-    print("fix all error datasets by Q'ing them for reseeding")
+  def fix(self) -> None:
     _db = DB(self.guic.cfg)
-    _db.fixErrs()
-    _db.close()
-
-  def sync(self):
-    print("sync - app will lose focus and hang while this occurs") # make it threaded? possible in tkinter?
-    _db = DB(self.guic.cfg)
-    synccer = Synccer(self.guic.cfg, _db)
-    synccer.unWait() # queue any leftover jobs from last time.
-    while(synccer.assess()):
-      synccer.run()
-    _db.close()
-    print("sync complete")
-
+    try:
+      _db.fixErrs()
+    finally:
+      _db.close()
+    self.guic.status.idle("Error datasets queued for reseeding.", 'Ok')
     self.refresh()
 
-###########################################################################
-###########################################################################
-class SubFrAdmin(SubFr):
-  def __init__(self, container, guic):
-    super().__init__(container, style="lyrInfo.TFrame")#"bad.TFrame")#
-    self.guic = guic
-    self.label = ttk.Label(self, text="Hello, Tkinter!")
-    self.label.pack(pady=20)
-    self.button = ttk.Button(self, text="Click Me", command=self.on_click)
-    self.button.pack()
-    # self.configure('lyrInfo.TFrame')
+  def sync(self) -> None:
+    if self.guic.busy:
+      self.guic.status.idle("Another job is still running.", 'Warn')
+      return
+    self.guic.busy = True
+    self.syncBtn.configure(state="disabled", text="SYNCING")
+    self.guic.status.busy("Syncing ...")
+    self.guic.runAsync(self._runSync, self._syncDone)
 
-  def on_click(self):
-    self.label.config(text="Button Clicked!")
-  
-  def test(self):
-    pass
-  def refresh(self):
-    pass
-###########################################################################
-###########################################################################
+  # Off the ui thread, so it opens its own connection and touches no widget.
+  def _runSync(self) -> None:
+    _db = DB(self.guic.cfg)
+    try:
+      synccer = Synccer(self.guic.cfg, _db)
+      synccer.unWait()  # queue any leftover jobs from last time
+      while synccer.assess():
+        synccer.run()
+    finally:
+      _db.close()
 
-if __name__ == "__main__":
-  gui = GuiControl(None, None)
-  gui.mainloop()
+  def _syncDone(self, _result: Any, err: Exception | None) -> None:
+    self.guic.busy = False
+    self.syncBtn.configure(text="SYNC")
+    self.guic.status.idle(
+      f"Sync failed: {err}" if err else "Sync complete.", 'Err' if err else 'Ok'
+    )
+    self.refresh()  # puts the button back to enabled
+
+
+if __name__ == '__main__':
+  logging.basicConfig(level=logging.INFO)
+  GuiControl('default').mainloop()

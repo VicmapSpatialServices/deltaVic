@@ -1,171 +1,218 @@
-import os, logging, traceback
-from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any
+import logging
+import traceback
+from datetime import datetime
 
 from .utils_db import PGClient
 from .utils_api import ApiUtils
 from .dbTable import LyrReg
-from .utils import FileUtils as FU, Supplies
+from .utils_db import DB
+from .utils import FileUtils as FU, Supplies, Config
 
 ###########################################################################
 
-class Synccer():
-  haltStates = [LyrReg.COMPLETE,LyrReg.WAIT] # ,LyrReg.OPS
 
-  def __init__(self, cfg, db):
+class Synccer:
+  haltStates = [LyrReg.COMPLETE, LyrReg.WAIT]  # ,LyrReg.OPS
+
+  def __init__(self, cfg: Config, db: DB):
     self.cfg = cfg
     self.db = db
     # self.lyrs = []
-    self.tables = []
-    self.views = []
-  
-  def unWait(self):
+    self.tables: list[LyrReg] = []
+    self.views: list[LyrReg] = []
+
+  def unWait(self) -> None:
     self.db.execute(LyrReg.unWaitUpSql())
 
-  def assess(self):
-    self.resolve() # updates out of date datasets to 'QUEUED'
-    _layers = [ll for ll in self.db.getRecSet(LyrReg) if ll.active and not ll.err and ll.status not in self.haltStates]
-    self.tables = [ll for ll in _layers if ll.relation=='table']
+  def assess(self) -> int:
+    self.resolve()  # updates out of date datasets to 'QUEUED'
+    _layers = [
+      ll
+      for ll in self.db.getRecSet(LyrReg)
+      if ll.active and not ll.err and ll.status not in self.haltStates
+    ]
+    self.tables = [ll for ll in _layers if ll.relation == 'table']
     # self.tables = [tt for tt in self.tables if tt.identity.startswith('vmtrans.tr_road')]#[0:1] # use to dither candidates if testing.
     # self.tables.sort(key=lambda ll:ll.extradata.get('row_count') if 'row_count' in ll.extradata else 0, reverse=True)
-    self.views = [ll for ll in _layers if ll.relation=='view']
-    
+    self.views = [ll for ll in _layers if ll.relation == 'view']
+
     if _nmbr := len(self.tables) + len(self.views):
       logging.info(f'To Process: {len(self.tables)} table(s) and {len(self.views)} view(s)')
     return _nmbr
-  
-  def resolve(self):
+
+  def resolve(self) -> None:
     _all_local = self.db.getRecSet(LyrReg)
 
-    _local, _errs, _remote = {}, {}, {}
+    _local: dict[str, LyrReg] = {}
+    _errs: dict[str, LyrReg] = {}
+    _remote: dict[str, LyrReg] = {}
 
-    [_local.update({d.identity:d}) for d in _all_local if not d.err]
-    [_errs.update({d.identity:d}) for d in _all_local if d.err]
-    [_remote.update({ll.identity:ll}) for ll in self.getVicmap()]
-    logging.info(f"Layer state: {len(_all_local)} in vm_meta.data, {len([i for i in _local if _local[i].active])} active, {len(_errs)} errors. {len(_remote)} available from vicmap_master")
+    [_local.update({d.identity: d}) for d in _all_local if not d.err]
+    [_errs.update({d.identity: d}) for d in _all_local if d.err]
+    [_remote.update({ll.identity: ll}) for ll in self.getVicmap()]
+    logging.info(
+      f"Layer state: {len(_all_local)} in vm_meta.data, {len([i for i in _local if _local[i].active])} active, {len(_errs)} errors. {len(_remote)} available from vicmap_master"
+    )
 
     # scroll thorugh the remote datasets and add any that don't exist locally
     # TODO: Check that the existing items have not changed, [ie: a pkey or geomType change -> md5(colSubset)?]
     logging.debug("checking remote layers exist locally")
     for name, dset in _remote.items():
       if not (_lyr := _local.get(name) or _errs.get(name)):
-        dset.sup_ver=-1 # new record gets a negative supply-id so it matches the latest seed.
-        dset.sup_type=Supplies.FULL # seed is full.
-        if self.cfg.get('sync_all') == "True": dset.active=True
+        dset.sup_ver = -1  # new record gets a negative supply-id so it matches the latest seed.
+        dset.sup_type = Supplies.FULL  # seed is full.
+        if self.cfg.get('sync_all') == "True":
+          dset.active = True
         self.db.execute(*dset.insSql())
 
     # scroll through the local datasets and set to queued if versions don't match
     logging.debug("checking local layers against remote")
-    for name,lyr in _local.items():
+    for name, lyr in _local.items():
       if not (_vmLyr := _remote.get(name)):
-        logging.warning(f"Dataset {name} doesn't exist in the remote vicmap_master, reflecting locally.") # auto delete withdrawn layers -> could lead to an isssue if apikey has changed to a reduced read set.
-        self.db.dropTable(name) # drop the table if it exists
-        self.db.execute(*_local.get(name).delSql()) # remove the meta.data record.
+        logging.warning(
+          f"Dataset {name} doesn't exist in the remote vicmap_master, reflecting locally."
+        )  # auto delete withdrawn layers -> could lead to an isssue if apikey has changed to a reduced read set.
+        self.db.dropTable(name)  # drop the table if it exists
+        self.db.execute(*lyr.delSql())  # remove the meta.data record.
         continue
       # Note conditions: only compare those datasets present locally as active, in a complete state and not in err.
-      if lyr.active and lyr.status == LyrReg.COMPLETE:
-        if lyr.sup_ver != _vmLyr.sup_ver:
-          # logging.info(f"version mismatch: {lyr.sup_ver}, {_vmLyr.sup_ver}")
-          self.db.execute(*lyr.upStatusSql(LyrReg.QUEUED))
+      if lyr.active and lyr.status == LyrReg.COMPLETE and lyr.sup_ver != _vmLyr.sup_ver:
+        self.db.execute(*lyr.upStatusSql(LyrReg.QUEUED))
 
-  def getVicmap(self):#seedDsets(self):
+  def getVicmap(self) -> list[LyrReg]:  # seedDsets(self):
     # get full list of datasets
     api = ApiUtils(self.cfg.get('baseUrl'), self.cfg.get('api_key'), self.cfg.get('client_id'))
     rsp = api.post('data', {})
     return [LyrReg(d) for d in rsp['datasets']]
-    
-  def run(self):
-    tracker = {}#{"queued":0,"download":0,"restore":0,"delete":0,"add":0,"reconcile":0,"clean":0}
+
+  def run(self) -> None:
+    # State name to seconds spent in it, summed over every layer in the run.
+    tracker: dict[
+      str, float
+    ] = {}  # {"queued":0,"download":0,"restore":0,"delete":0,"add":0,"reconcile":0,"clean":0}
     try:
-      if self.tables: #process table based on status
-        [Sync(self.db, self.cfg, tbl, self.haltStates,tracker).process() for tbl in self.tables]
+      if self.tables:  # process table based on status
+        [Sync(self.db, self.cfg, tbl, self.haltStates, tracker).process() for tbl in self.tables]
       else:
-        if self.views: # process views based on status
-          [Sync(self.db, self.cfg, vw, self.haltStates,tracker).process() for vw in self.views]
+        if self.views:  # process views based on status
+          [Sync(self.db, self.cfg, vw, self.haltStates, tracker).process() for vw in self.views]
       logging.info("--timings report--")
       [logging.info(f"{state:<10}: {secs:8.2f}") for state, secs in tracker.items()]
-    except Exception as ex:
+    except Exception:
       _msg = "Something went wrong in the Synccer"
       logging.error(_msg)
-      raise Exception(_msg)
-  
-  def restore(self, lyrQual):
+      raise
+
+  def restore(self, lyrQual: str) -> None:
     fPath = f"temp/{lyrQual}.dmp"
     PGClient(self.db, self.cfg.get('dbClientPath')).restore_file(fPath)
 
-  def dump(self, lyrQual):
+  def dump(self, lyrQual: str) -> str:
     fPath = f"temp/{lyrQual}.dmp"
     PGClient(self.db, self.cfg.get('dbClientPath')).dump_file(lyrQual, fPath)
     return fPath
 
-  def upload(self, srcQual, supType, relation=None, md_uuid=None, geomType=None, vdp=False): # 4 optional parameters for initial uploads (creates). (Not strictly necessary).
+  def upload(
+    self,
+    srcQual: str,
+    supType: str,
+    relation: str | None = None,
+    md_uuid: str | None = None,
+    geomType: str | None = None,
+    vdp: bool = False,
+  ) -> bool:  # 4 optional parameters for initial uploads (creates). (Not strictly necessary).
     # eg sync.upload('vmadd.address', Supplies.INC)
     logging.info(f"uploading {srcQual} to VLRS")
     # return # for safety during testing
 
     try:
-      lyr = SyncLyr([srcQual,relation,supType,None,md_uuid,geomType, vdp])
-      if upInf := self.stageUpload(lyr):
-        # fPath, tgtQual = upInf
-        return self.pushToVLRS(lyr)#.ident, lyr.fPath, lyr.supType, relation, md_uuid, _geomType, _vdp, dshLyr.tgtQual)
+      lyr = SyncLyr([srcQual, relation, supType, None, md_uuid, geomType, vdp])
+      if self.stageUpload(lyr):
+        return self.pushToVLRS(
+          lyr
+        )  # .ident, lyr.fPath, lyr.supType, relation, md_uuid, _geomType, _vdp, dshLyr.tgtQual)
         # return self.pushToVLRS(srcQual, fPath, supType, relation, md_uuid, geomType, vdp, tgtQual) # f"Successfully uploaded {fPath}"?
     except Exception as ex:
       errStr = f"Failed to upload {srcQual}: {str(ex)}"
       logging.error(errStr)
-    return False # 
+    return False
 
-  def stageUpload(self, dshLyr):
+  def stageUpload(self, dshLyr: SyncLyr) -> bool:
     logging.info(f"Staging upload for {dshLyr.ident}")
     try:
       # copy layer to miscsupply schema then dump it. Should include indexes.
-      self.db.copyTable(dshLyr.ident, dshLyr.tgtQual) # copy layer to miscsupply schema then dump it. Should include indexes.
-      logging.debug(f"{dshLyr.tgtQual}, {dshLyr.fPath}") # dump from miscsupply schema.
-      PGClient(self.db, self.cfg.get('dbClientPath')).dump_file(dshLyr.tgtQual, dshLyr.fPath) # export the file
+      self.db.copyTable(
+        dshLyr.ident, dshLyr.tgtQual
+      )  # copy layer to miscsupply schema then dump it. Should include indexes.
+      logging.debug(f"{dshLyr.tgtQual}, {dshLyr.fPath}")  # dump from miscsupply schema.
+      PGClient(self.db, self.cfg.get('dbClientPath')).dump_file(
+        dshLyr.tgtQual, dshLyr.fPath
+      )  # export the file
       return True
     except Exception as ex:
       logging.error(str(ex))
       return False
-  
-  def pushToVLRS(self, lyr):
+
+  def pushToVLRS(self, lyr: SyncLyr) -> bool:
     logging.info(f"Pushing upload to VLRS: {lyr.ident}")
-    #register the upload on VLRS and get an s3promise-link
+    # register the upload on VLRS and get an s3promise-link
     try:
-      data = {"dset":lyr.ident,"fname":lyr.fPath,"sup_type":lyr.supType, "relation":lyr.relation}
-      if lyr.geomType: data.update({"geom_type":lyr.geomType}) # required for new dataset only
-      if lyr.md_uuid: data.update({"md_uuid":lyr.md_uuid}) # required for new datasets only if it propogates to VDP
-      if lyr.relation: data.update({"relation":lyr.relation}) 
-      if lyr.vdp: data.update({"vdp":lyr.vdp})
+      data: dict[str, Any] = {
+        "dset": lyr.ident,
+        "fname": lyr.fPath,
+        "sup_type": lyr.supType,
+        "relation": lyr.relation,
+      }
+      if lyr.geomType:
+        data.update({"geom_type": lyr.geomType})  # required for new dataset only
+      if lyr.md_uuid:
+        data.update(
+          {"md_uuid": lyr.md_uuid}
+        )  # required for new datasets only if it propogates to VDP
+      if lyr.relation:
+        data.update({"relation": lyr.relation})
+      if lyr.vdp:
+        data.update({"vdp": lyr.vdp})
 
       api = ApiUtils(self.cfg.get('baseUrl'), self.cfg.get('api_key'), self.cfg.get('client_id'))
-      result = api.post('upload', data) # throws exception if code!=200
+      result = api.post('upload', data)  # throws exception if code!=200
       if s3promiseLink := result.get('uploadPromise'):
         api.put(s3promiseLink, lyr.fPath)
       else:
-        raise Exception(f"S3 put_object failed")
-      
+        raise Exception("S3 put_object failed")
+
       # remove the migration artifacts
       self.db.dropTable(lyr.tgtQual)
-      FU.remove(lyr.fPath) # clean up the dumpfile
-      
-      return True # f"Successfully uploaded {fPath}"
-    
+      FU.remove(lyr.fPath)  # clean up the dumpfile
+
+      return True  # f"Successfully uploaded {fPath}"
+
     except Exception as ex:
       logging.info(traceback.format_exc())
       errStr = f"Failed to upload {lyr.fPath}: {str(ex)}"
       logging.error(errStr)
-      return False # 
+      return False  #
+
 
 ###########################################################################
+# fmt: off
                      ### y   y N    N CCCCC
                      #   y   y NN   N C
                      ###  y y  N N  N C
                        #   y   N  N N C
                      ###   y   N   NN CCCCC
+# fmt: on
 ###########################################################################
 
-class Sync():
+
+class Sync:
   DATAPATH = 'temp'
 
-  def __init__(self, db, cfg, lyr, haltStates, tracker):
+  def __init__(
+    self, db: DB, cfg: Config, lyr: LyrReg, haltStates: list[str], tracker: dict[str, float]
+  ):
     self.db = db
     self.cfg = cfg
     self.lyr = lyr
@@ -174,82 +221,93 @@ class Sync():
 
   def process(self):
     while self.lyr.status not in self.halt and not self.lyr.err:
-      startTime = datetime.now() 
-      _status = self.lyr.status.lower() # store this here before it is up-set by the process.
-      
+      startTime = datetime.now()
+      _status = self.lyr.status.lower()  # store this here before it is up-set by the process.
+
       try:
         getattr(self, _status)()
       except Exception as ex:
         logging.error(str(ex))
         logging.debug(traceback.format_exc())
-        self.db.execute(*self.lyr.upExtraSql({"error":str(ex)}))
-        self.db.execute(*self.lyr.setErr()) # treats reconcile differently.
-      
-      self.upTrack(_status, (datetime.now()-startTime).total_seconds(), self.lyr)
-      
-  def quiescent(self): # if attempting a sync here, this lyr must now be now active
+        self.db.execute(*self.lyr.upExtraSql({"error": str(ex)}))
+        self.db.execute(*self.lyr.setErr())  # treats reconcile differently.
+
+      self.upTrack(_status, (datetime.now() - startTime).total_seconds(), self.lyr)
+
+  def quiescent(self):  # if attempting a sync here, this lyr must now be now active
     self.db.execute(*self.lyr.upStatusSql(LyrReg.QUEUED))
 
   def queued(self):
-    logging.debug(F"q-ing {self.lyr.identity} -- current({self.lyr.sup}:{self.lyr.sup_ver}:{self.lyr.sup_type})")
-    self.db.execute(*self.lyr.delExtraKey('error')) # clear the err for a new run
-    
+    logging.debug(
+      f"q-ing {self.lyr.identity} -- current({self.lyr.sup}:{self.lyr.sup_ver}:{self.lyr.sup_type})"
+    )
+    self.db.execute(*self.lyr.delExtraKey('error'))  # clear the err for a new run
+
     # get the next dump file from data endpoint
     api = ApiUtils(self.cfg.get('baseUrl'), self.cfg.get('api_key'), self.cfg.get('client_id'))
-    _rsp = api.post("data", {"dset":self.lyr.identity,"sup_ver":self.lyr.sup_ver})
+    _rsp = api.post("data", {"dset": self.lyr.identity, "sup_ver": self.lyr.sup_ver})
     if not (_next := _rsp.get("next")):
-      if self.lyr.sup_ver == _rsp.get("sup_ver"): # have the latest already
+      if self.lyr.sup_ver == _rsp.get("sup_ver"):  # have the latest already
         logging.warning("Requested data load but endpoint says max(sup_ver) is current")
         self.db.execute(*self.lyr.upStatusSql(LyrReg.COMPLETE))
       else:
         logging.warning("Requested data load but endpoint says next ready only half ready yet")
         self.db.execute(*self.lyr.upStatusSql(LyrReg.WAIT))
       return
-    
+
     self.db.execute(*self.lyr.upExtraSql(_next))
 
-    _supDate = datetime.fromisoformat(_next['sup_date']) if _next['sup_date'] else None # always there? Is there an edge case it may still be missing?
-    logging.info(F"q-ing {self.lyr.identity} ({self.lyr.sup}:{self.lyr.sup_ver}:{self.lyr.sup_type})-->({_next['sup_ver']}:{_next['sup_type']})")#:{_supDate}
+    _supDate = (
+      datetime.fromisoformat(_next['sup_date']) if _next['sup_date'] else None
+    )  # always there? Is there an edge case it may still be missing?
+    logging.info(
+      f"q-ing {self.lyr.identity} ({self.lyr.sup}:{self.lyr.sup_ver}:{self.lyr.sup_type})-->({_next['sup_ver']}:{_next['sup_type']})"
+    )  #:{_supDate}
     self.db.execute(*self.lyr.upSupSql(_next['sup_ver'], _next['sup_type'], _supDate))
     self.db.execute(*self.lyr.upStatusSql(LyrReg.DOWNLOAD))
 
   def download(self):
-    logging.debug(F" -> download-ing {self.lyr.identity}")
-    if not os.path.exists(self.DATAPATH): os.makedirs(self.DATAPATH)
+    logging.debug(f" -> download-ing {self.lyr.identity}")
+    Path(self.DATAPATH).mkdir(parents=True, exist_ok=True)
     fPath = f"{self.DATAPATH}/{self.lyr.extradata['filename']}"
     ApiUtils.download_file(self.lyr.extradata['s3_url'], fPath)
-    
-    self.db.execute(*self.lyr.delExtraKey('s3_url')) # remove s3_url from extradata as we are done with it now.
+
+    self.db.execute(
+      *self.lyr.delExtraKey('s3_url')
+    )  # remove s3_url from extradata as we are done with it now.
     self.db.execute(*self.lyr.upStatusSql(LyrReg.RESTORE))
 
   def restore(self):
     # restore the file - full loads go straight to each vicmap schema, incs go to the vm_delta schema.
     # logging.debug(f"restore version: {PGClient(self.db, self.cfg.get('dbClientPath')).get_restore_version()}") # test pg connection.
-    
-    #ensure target schema exists
+
+    # ensure target schema exists
     if self.lyr.sch not in self.db.getSchemas():
       self.db.createSch(self.lyr.sch)
 
     fPath = f"{self.DATAPATH}/{self.lyr.extradata['filename']}"
     PGClient(self.db, self.cfg.get('dbClientPath')).restore_file(fPath)
-    
+
     if self.lyr.sup_type == Supplies.FULL:
       self.db.execute(*self.lyr.upStatusSql(LyrReg.RECONCILE))
     else:
-      self.db.execute(*self.lyr.upStatusSql(LyrReg.OPS))#DELETE
-  
-  def ops(self): # maintains idempotency if you are doing reRunFromState.
+      self.db.execute(*self.lyr.upStatusSql(LyrReg.OPS))  # DELETE
+
+  def ops(self):  # maintains idempotency if you are doing reRunFromState.
     logging.debug(f" -> Deleting rows for {self.lyr.identity}")
-    _delta = self.lyr.extradata['filename'].replace('.dmp','')
-    self.db.execute(f"delete from {self.lyr.identity} where {self.lyr.pkey} in (select {self.lyr.pkey} from {_delta})")
+    _delta = self.lyr.extradata['filename'].replace('.dmp', '')
+    self.db.execute(
+      f"delete from {self.lyr.identity} where {self.lyr.pkey} in (select {self.lyr.pkey} from {_delta})"
+    )
 
     logging.debug(f" -> Adding rows for {self.lyr.identity}")
-    colsCsv = ",".join(self.db.getAllCols(self.lyr.identity)) # Get Column names as csv for sql.
-    self.db.execute(f"insert into {self.lyr.identity} (select {colsCsv} from {_delta} where operation='INSERT')")
-    
-    self.db.execute(*self.lyr.upStatusSql(LyrReg.VACUUM)) # LyrReg.RECONCILE# LyrReg.ANALYZE ?
+    colsCsv = ",".join(self.db.getAllCols(self.lyr.identity))  # Get Column names as csv for sql.
+    self.db.execute(
+      f"insert into {self.lyr.identity} (select {colsCsv} from {_delta} where operation='INSERT')"
+    )
 
-  
+    self.db.execute(*self.lyr.upStatusSql(LyrReg.VACUUM))  # LyrReg.RECONCILE# LyrReg.ANALYZE ?
+
   def vacuum(self):
     self.db.execute(f"vacuum {self.lyr.identity}")
     self.db.execute(*self.lyr.upStatusSql(LyrReg.ANALYZE))
@@ -258,59 +316,88 @@ class Sync():
     self.db.execute(f"analyze {self.lyr.identity}")
     self.db.execute(*self.lyr.upStatusSql(LyrReg.RECONCILE))
 
-  def reconcile(self): # reconcile the row count and check sum -> signOff()?
+  def reconcile(self):  # reconcile the row count and check sum -> signOff()?
     # warning: if table is malformed and missing ufi_created col, it will fail here and not insert stats, which will throw errs when assembling datasets.
     # warning 2, if a datasets does not have a pkey specified it will also failed - need to update the control schema prior to anyone seeding.
-    logging.debug(F" -> reconcile-ing {self.lyr.identity}")
+    logging.debug(f" -> reconcile-ing {self.lyr.identity}")
     recStr = ""
-    
-    try: 
+
+    try:
       supCount, supChkSum = self.lyr.extradata['row_count'], self.lyr.extradata['check_sum']
       logging.debug(f"{supCount} {supChkSum}")
-      maxUfiDate, maxUfi, tblCount, tblChkSum = self.db.getTblStats(self.lyr.identity, Supplies.meta(self.lyr.sup).ufiCreateCol, self.lyr.pkey) # , state_query=self.obj.pidUpSql()
+      _maxUfiDate, _maxUfi, tblCount, tblChkSum = self.db.getTblStats(
+        self.lyr.identity, Supplies.meta(self.lyr.sup).ufiCreateCol, self.lyr.pkey
+      )  # , state_query=self.obj.pidUpSql()
       logging.debug(f"{tblCount} {tblChkSum}")
-      
+
     except Exception as ex:
       logging.error(traceback.format_exc())
       logging.warning(f"{self.lyr.identity} did not return stats: {str(ex)}")
-      raise Exception(f"Problem getting stats: {str(ex)}")
-    
-    recStr += f" count(remote:{supCount}!=local:{tblCount})-diff({supCount-tblCount})" if tblCount!=supCount else ""
-    recStr += f" chkSum(remote:{supChkSum}!=local:{tblChkSum})-diff({supChkSum-tblChkSum})" if tblChkSum!=supChkSum else ""
+      raise Exception(f"Problem getting stats: {str(ex)}") from ex
+
+    recStr += (
+      f" count(remote:{supCount}!=local:{tblCount})-diff({supCount - tblCount})"
+      if tblCount != supCount
+      else ""
+    )
+    recStr += (
+      f" chkSum(remote:{supChkSum}!=local:{tblChkSum})-diff({supChkSum - tblChkSum})"
+      if tblChkSum != supChkSum
+      else ""
+    )
     if recStr:
       # if the reconcile has failed, (chaff from an upload?) queue the full supply instead. No, leads to loopy behaviour.
       raise Exception(f"Supply misreconciled: {recStr}")
     # self.db.execute(*self.lyr.upStatsSql(maxUfiDate, maxUfi, tblCount, tblChkSum))
-    
+
     # self.db.execute(*self.lyr.upSupSql(self.lyr.extradata['sup_ver'], self.lyr.extradata['sup_type'], self.lyr.extradata['sup_date']))
     self.db.execute(*self.lyr.upStatusSql(LyrReg.CLEAN))
-   
+
   def clean(self):
     # clean up the temp file and the temp view
-    logging.debug(F" -> clean-ing {self.lyr.identity}")
+    logging.debug(f" -> clean-ing {self.lyr.identity}")
     if self.lyr.sup_type == Supplies.INC:
       self.db.dropTable(self.lyr.extradata['filename'].replace('.dmp',''))
     FU.remove(f"{self.DATAPATH}/{self.lyr.extradata['filename']}")
     # status->COMPLETE or err=true
     self.db.execute(*self.lyr.upStatusSql(LyrReg.COMPLETE))
 
-  def upTrack(self, status, duration, lyr):
+  def upTrack(self, status: str, duration: float, lyr: LyrReg) -> None:
     # whole of run stats
     if status not in self.tracker:
-      self.tracker.update({status:duration})
+      self.tracker.update({status: duration})
     else:
       self.tracker[status] = self.tracker[status] + duration
-    
-    # individual layer stats
-    tms = 'timings-full' if lyr.sup_type==Supplies.FULL else f'timings-inc-{lyr.sup_ver}' 
-    _tms = lyr.extradata[tms] if tms in lyr.extradata else {}
-    _tms.update({status:duration}) # overwrite
-    self.db.execute(*lyr.upExtraSql({tms:_tms}))
 
-class SyncLyr():
-  cols = ['ident','relation','supType','pubDate','md_uuid','geomType','vdp'] # 6 items, in range below
-  def __init__(self, row):
+    # individual layer stats
+    tms = 'timings-full' if lyr.sup_type == Supplies.FULL else f'timings-inc-{lyr.sup_ver}'
+    _tms = lyr.extradata.get(tms, {})
+    _tms.update({status: duration})  # overwrite
+    self.db.execute(*lyr.upExtraSql({tms: _tms}))
+
+
+class SyncLyr:
+  # Set by setattr from cols, so named here to be visible.
+  ident: str
+  relation: str | None
+  supType: str
+  pubDate: str | None
+  md_uuid: str | None
+  geomType: str | None
+  vdp: bool
+
+  cols = [
+    'ident',
+    'relation',
+    'supType',
+    'pubDate',
+    'md_uuid',
+    'geomType',
+    'vdp',
+  ]  # 6 items, in range below
+
+  def __init__(self, row: list[Any]):
     [setattr(self, self.cols[ii], row[ii]) for ii in range(len(self.cols))]
-    
+
     self.fPath = f"temp/{self.ident}.dmp"
     self.tgtQual = f'miscsupply.{self.ident.split('.')[1]}'
