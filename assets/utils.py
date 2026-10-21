@@ -258,11 +258,11 @@ class Test:
     print(config.getStage())
 
   def db(self, db: DB) -> None:
-    result = db.item("select count(*) from eisedit.mapindex_100d")
+    result = db.item("select count(*) from vmadmin.lga_polygon")
     logging.info(f"result: {result} *")
-    result = db.row("select count(*), sum(ufi) from eisedit.mapindex_100d")
+    result = db.row("select count(*), sum(ufi) from vmadmin.lga_polygon")
     logging.info(f"result: {result} *")
-    result = db.rows("select * from eisedit.mapindex_100d")
+    result = db.rows("select * from vmadmin.lga_polygon")
     rows = '\r'.join([str(r) for r in result])
     logging.info(f" count:{len(result)}\r result: {rows} *")
 
