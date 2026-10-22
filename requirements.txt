@@ -1,2 +1,2 @@
 requests==2.34.2
-psycopg2-binary==2.9.12
+psycopg2-binary==2.9.13
