@@ -179,7 +179,7 @@ class Config:
     # self.cp.add_section('default')
     self.cp[stg] = {
       'name': 'deltaVic',
-      'baseUrl': 'https://c6w2u7gu3d.execute-api.ap-southeast-2.amazonaws.com/vmapi/',
+      'baseUrl': 'https://api.vicmap.vic.gov.au',
       # Strings, because that is what configparser stores.
       'log_level': '20',
       'sync_all': 'False',
